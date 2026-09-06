@@ -1,0 +1,369 @@
+"use strict";
+import {
+  app,
+  protocol,
+  BrowserWindow,
+  screen,
+  ipcMain,
+  globalShortcut,
+  dialog,
+  shell
+} from "electron";
+import { createProtocol } from "vue-cli-plugin-electron-builder/lib";
+import { autoUpdater } from "electron-updater";
+import fs from "fs";
+import path from "path";
+import DB from "@/utils/db";
+import { restoreDataFile } from "@/services/taskRepository";
+import { initExtra, createTray, createAppMenu } from "@/utils/backgroundExtra";
+import {
+  createWindowController,
+  getSafeBounds
+} from "@/services/windowController";
+import pkg from "../package.json";
+const isDevelopment = process.env.NODE_ENV !== "production";
+const isTest = process.env.YANQIAN_TEST === "1";
+if (isTest && process.env.YANQIAN_DATA_DIR)
+  app.setPath("userData", path.resolve(process.env.YANQIAN_DATA_DIR));
+let win, controller, repository, boundsTimer, backupTimer;
+let readyToQuit = false,
+  quitting = false,
+  pendingFlush = null,
+  flushId = 0;
+let boundsWarningShown = false;
+const stateFile = () => path.join(app.getPath("userData"), "window-state.json");
+
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on("second-instance", () => {
+    if (controller) controller.recover();
+  });
+  protocol.registerSchemesAsPrivileged([
+    { scheme: "app", privileges: { secure: true, standard: true } }
+  ]);
+  app
+    .whenReady()
+    .then(init)
+    .catch(error => {
+      dialog.showErrorBox("眼前无法启动", error.message);
+      app.exit(1);
+    });
+}
+function send(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+function saveBounds() {
+  if (!win || win.isDestroyed() || win.isMinimized()) return;
+  try {
+    repository.atomicWrite(stateFile(), JSON.stringify(win.getBounds()));
+  } catch (error) {
+    if (!boundsWarningShown) {
+      boundsWarningShown = true;
+      send("app:notice", `窗口位置未保存：${error.message}`);
+    }
+  }
+}
+function requestFlush() {
+  if (!win || win.isDestroyed()) return Promise.resolve(true);
+  if (pendingFlush) return pendingFlush.promise;
+  const id = ++flushId;
+  let resolve;
+  const promise = new Promise(done => {
+    resolve = done;
+  });
+  const timer = setTimeout(() => {
+    pendingFlush = null;
+    resolve(false);
+    if (controller) controller.recover();
+    send("app:notice", "窗口未响应，已取消隐藏或退出；请先确认事项已保存。");
+  }, 5000);
+  pendingFlush = { id, resolve, timer, promise };
+  send("window:flush-request", id);
+  return promise;
+}
+ipcMain.on("window:flush-result", (event, result) => {
+  if (
+    !win ||
+    event.sender !== win.webContents ||
+    !pendingFlush ||
+    result.id !== pendingFlush.id
+  )
+    return;
+  const pending = pendingFlush;
+  pendingFlush = null;
+  clearTimeout(pending.timer);
+  pending.resolve(result.ok === true);
+});
+async function quitSafely() {
+  if (quitting || readyToQuit) return;
+  quitting = true;
+  if (!(await requestFlush())) {
+    quitting = false;
+    controller.recover();
+    return;
+  }
+  saveBounds();
+  try {
+    repository.backup();
+  } catch (error) {
+    quitting = false;
+    controller.recover();
+    send(
+      "app:notice",
+      `退出前备份失败：${error.message}。事项仍保存在本机，请检查磁盘后重试。`
+    );
+    return;
+  }
+  readyToQuit = true;
+  app.quit();
+}
+async function afterHide() {
+  saveBounds();
+  if (!(await requestFlush())) {
+    controller.recover();
+    return;
+  }
+  if (!repository.snapshot().settings.hideHintSeen) {
+    const shortcut = controller.getAccelerator();
+    const detail = `点击系统托盘里的眼前图标，或再次启动眼前，即可恢复窗口。${
+      shortcut
+        ? `\n快捷键：${shortcut}`
+        : "\n快捷键未注册，请在设置中选择其他组合。"
+    }`;
+    try {
+      if (!isTest)
+        await dialog.showMessageBox({
+          type: "info",
+          title: "眼前已隐藏",
+          message: "可以随时找回窗口",
+          detail,
+          buttons: ["知道了"]
+        });
+      repository.command("settings", { hideHintSeen: true });
+    } catch (error) {
+      controller.recover();
+      send("app:notice", error.message);
+    }
+  }
+}
+
+async function openRepository() {
+  const directory = app.getPath("userData");
+  for (;;) {
+    try {
+      return DB.initDB(directory);
+    } catch (error) {
+      if (isTest) throw error;
+      const result = await dialog.showMessageBox({
+        type: "error",
+        title: "本地数据需要恢复",
+        message: error.message,
+        detail:
+          "原文件会保留。可以选择完整 JSON 备份恢复，或打开数据目录检查备份与 safety 文件夹。",
+        buttons: ["选择备份恢复", "打开数据目录", "退出"],
+        defaultId: 0,
+        cancelId: 2
+      });
+      if (result.response === 2) {
+        readyToQuit = true;
+        app.quit();
+        return null;
+      }
+      if (result.response === 1) {
+        await shell.openPath(directory);
+        continue;
+      }
+      const selected = await dialog.showOpenDialog({
+        title: "选择完整备份",
+        properties: ["openFile"],
+        filters: [{ name: "JSON 备份", extensions: ["json"] }]
+      });
+      if (selected.canceled || !selected.filePaths.length) continue;
+      try {
+        restoreDataFile({
+          directory,
+          filename: isDevelopment ? "data-dev.json" : "data.json",
+          source: selected.filePaths[0]
+        });
+      } catch (restoreError) {
+        await dialog.showMessageBox({
+          type: "error",
+          title: "恢复失败",
+          message: restoreError.message,
+          detail: "原文件未被替换，请检查备份和磁盘权限。"
+        });
+      }
+    }
+  }
+}
+
+async function init() {
+  repository = await openRepository();
+  if (!repository) return;
+  createAppMenu();
+  let saved = {};
+  try {
+    saved = JSON.parse(fs.readFileSync(stateFile(), "utf8"));
+  } catch (error) {
+    /* first launch */
+  }
+  const primary = screen.getPrimaryDisplay().workArea;
+  const initial = getSafeBounds(
+    {
+      x: primary.x + primary.width - 350,
+      y: primary.y + 30,
+      width: 320,
+      height: 290,
+      ...saved
+    },
+    screen
+  );
+  win = new BrowserWindow({
+    ...initial,
+    minWidth: 320,
+    minHeight: 290,
+    frame: false,
+    transparent: true,
+    show: false,
+    minimizable: true,
+    maximizable: false,
+    skipTaskbar: false,
+    title: pkg.name,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  controller = createWindowController({
+    getWindow: () => win,
+    screen,
+    globalShortcut,
+    readSettings: () => repository.snapshot().settings,
+    writeSettings: patch => repository.command("settings", patch),
+    onShow: () => {
+      send("window:unlocked");
+      saveBounds();
+    },
+    onHide: () => {
+      afterHide().catch(error => send("app:notice", error.message));
+    }
+  });
+  const shortcut = controller.registerAccelerator();
+  controller.shortcutError = shortcut.ok ? "" : shortcut.error;
+  initExtra({ getWindow: () => win, controller, requestFlush });
+  createTray({
+    showWindow: () => controller.recover(),
+    hideWindow: () => controller.hide(),
+    showSettings: () => {
+      controller.recover();
+      send("window:settings");
+    },
+    quit: quitSafely
+  });
+  ipcMain.handle("hideWindow", () => controller.hide());
+  ipcMain.handle("minimizeWindow", event => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents)
+      return false;
+    saveBounds();
+    win.minimize();
+    return true;
+  });
+  ipcMain.handle("closeWindow", event => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents)
+      return false;
+    return quitSafely();
+  });
+  ipcMain.handle("setIgnoreMouseEvents", (event, ignore) => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+    win.setIgnoreMouseEvents(!!ignore, { forward: true });
+  });
+  win.on("move", () => {
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(saveBounds, 150);
+  });
+  win.on("resize", () => {
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(saveBounds, 150);
+  });
+  win.on("close", event => {
+    if (!readyToQuit) {
+      event.preventDefault();
+      quitSafely();
+    }
+  });
+  win.on("closed", () => {
+    win = null;
+  });
+  // A taskbar restore after Show Desktop must also release click-through and the UI mask.
+  win.on("restore", () => {
+    if (win && !win.isDestroyed()) {
+      win.setIgnoreMouseEvents(false);
+      win.setEnabled(true);
+      send("window:unlocked");
+    }
+  });
+  win.webContents.on("render-process-gone", () => {
+    controller.recover();
+    dialog
+      .showMessageBox({
+        type: "error",
+        title: "界面已停止响应",
+        message: "事项保存在本机。是否重新加载界面？",
+        buttons: ["重新加载", "稍后"],
+        defaultId: 0
+      })
+      .then(result => {
+        if (result.response === 0 && win && !win.isDestroyed()) win.reload();
+      });
+  });
+  for (const name of ["display-removed", "display-metrics-changed"])
+    screen.on(name, () => {
+      if (win && !win.isDestroyed()) {
+        win.setBounds(getSafeBounds(win.getBounds(), screen));
+        saveBounds();
+      }
+    });
+  backupTimer = setInterval(() => {
+    try {
+      repository.backup();
+    } catch (error) {
+      send("app:notice", `自动备份失败：${error.message}`);
+    }
+  }, 5 * 60 * 1000);
+  if (process.env.WEBPACK_DEV_SERVER_URL)
+    await win.loadURL(process.env.WEBPACK_DEV_SERVER_URL);
+  else {
+    createProtocol("app");
+    await win.loadURL("app://./index.html");
+  }
+  controller.recover();
+  if (repository.recoveryNotice) send("app:notice", repository.recoveryNotice);
+  if (!shortcut.ok)
+    send(
+      "app:notice",
+      "快捷键注册失败，请在设置中更换组合。仍可通过任务栏、托盘或再次启动恢复窗口。"
+    );
+  if (!isDevelopment && !isTest && app.isPackaged)
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+app.on("before-quit", event => {
+  if (!readyToQuit && repository) {
+    event.preventDefault();
+    quitSafely();
+  }
+});
+app.on("will-quit", () => {
+  clearTimeout(boundsTimer);
+  clearInterval(backupTimer);
+  if (controller) controller.dispose();
+});
+app.on("activate", () => {
+  if (controller) controller.recover();
+});
+app.on("window-all-closed", () => {
+  if (readyToQuit) app.quit();
+});
+if (isDevelopment) {
+  if (process.platform === "win32")
+    process.on("message", data => {
+      if (data === "graceful-exit") quitSafely();
+    });
+  else process.on("SIGTERM", quitSafely);
+}

@@ -1,0 +1,36 @@
+{
+  "todoList": [
+    {
+      "id": "37f3c15c09e1287dcb9c484efaafd06f",
+      "content": "数量的劳动力",
+      "todo_date": "2026/09/06",
+      "todo_datetime": "2026/09/06 15:49:03",
+      "updated_at": "2026/09/06 20:54:58"
+    },
+    {
+      "id": "fc5d69325e922869762e9d88e7e33f23",
+      "content": "顶顶顶顶",
+      "todo_date": "2026/09/06",
+      "todo_datetime": "2026/09/06 20:54:46",
+      "updated_at": "2026/09/06 20:54:48"
+    }
+  ],
+  "doneList": [
+    {
+      "id": "51d005985663f06620043f797c0e0dec",
+      "content": "顶顶顶顶顶给",
+      "todo_date": "2026/09/06",
+      "todo_datetime": "2026/09/06 15:49:12",
+      "updated_at": "2026/09/06 15:49:19",
+      "done_date": "2026/09/06",
+      "done_datetime": "2026/09/06 15:49:19"
+    }
+  ],
+  "settings": {
+    "hideHintSeen": true
+  },
+  "trashList": [],
+  "schemaVersion": 1,
+  "revision": 53,
+  "lastCompletion": null
+}
