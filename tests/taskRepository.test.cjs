@@ -159,3 +159,41 @@ test('failed attachment staging during import leaves current tasks and images un
   const target=fixture(t,undefined,io);const safeId=add(target.repo,'keep current');target.repo.addScreenshot({list:'todoList',taskId:safeId,png:png1x1});const before=target.repo.snapshot();const oldFiles=fs.readdirSync(path.join(target.directory,'attachments')).sort();fail=true;
   assert.throws(()=>target.repo.importFrom(backup),/attachment disk denied/);assert.deepEqual(target.repo.snapshot(),before);assert.deepEqual(fs.readdirSync(path.join(target.directory,'attachments')).sort(),oldFiles);assert.deepEqual(target.repo.readScreenshot({list:'todoList',taskId:safeId,screenshotId:before.todoList[0].screenshots[0].id}),png1x1);
 });
+
+test('legacy data migrates into one editable default todo tab',t=>{
+  const {repo,reopen}=fixture(t,{todoList:[{content:'legacy'}],doneList:[],settings:{}});const state=repo.snapshot();
+  assert.deepEqual(state.tabs,[{id:'todo',name:'待办'}]);assert.equal(state.todoList[0].tabId,'todo');assert.equal(state.todoList[0].tabName,'待办');assert.deepEqual(reopen().snapshot(),state);
+});
+
+test('todo tabs can be added renamed and deleted while completed remains outside editable tabs',t=>{
+  const {repo}=fixture(t);let state=repo.command('addTab',{name:'工作'});const tab=state.tabs.find(item=>item.name==='工作');assert.ok(tab);
+  state=repo.command('renameTab',{id:tab.id,name:'项目'});assert.equal(state.tabs.find(item=>item.id===tab.id).name,'项目');
+  const id=repo.command('add',{content:'tab task',tabId:tab.id}).todoList.find(item=>item.tabId===tab.id).id;
+  state=repo.addScreenshot({list:'todoList',taskId:id,png:png1x1});const shot=state.todoList.find(item=>item.id===id).screenshots[0];
+  state=repo.command('deleteTab',{id:tab.id});assert.ok(!state.tabs.some(item=>item.id===tab.id));assert.ok(!state.todoList.some(item=>item.id===id));assert.equal(state.trashList[0].task.id,id);
+  state=repo.command('restoreTrash',{id});assert.ok(state.tabs.some(item=>item.id===tab.id&&item.name==='项目'));assert.ok(state.todoList.some(item=>item.id===id&&item.tabId===tab.id));
+  assert.deepEqual(repo.readScreenshot({list:'todoList',taskId:id,screenshotId:shot.id}),png1x1);
+  assert.throws(()=>repo.command('deleteTab',{id:'done'}),/已完成|不存在/);
+});
+
+test('deleting the last editable tab remains empty after restart and a new tab can be added',t=>{
+  const {repo,reopen}=fixture(t);repo.command('deleteTab',{id:'todo'});const next=reopen();assert.deepEqual(next.snapshot().tabs,[]);
+  const state=next.command('addTab',{name:'重新开始'});assert.equal(state.tabs.length,1);assert.equal(state.tabs[0].name,'重新开始');
+});
+
+test('task creation and reorder are scoped to the selected tab',t=>{
+  const {repo}=fixture(t);const work=repo.command('addTab',{name:'工作'}).tabs.find(tab=>tab.name==='工作');
+  const a=repo.command('add',{content:'A',tabId:'todo'}).todoList.find(item=>item.content==='A');const b=repo.command('add',{content:'B',tabId:work.id}).todoList.find(item=>item.content==='B');const c=repo.command('add',{content:'C',tabId:'todo'}).todoList.find(item=>item.content==='C');
+  const state=repo.command('reorder',{tabId:'todo',ids:[c.id,a.id]});assert.deepEqual(state.todoList.filter(item=>item.tabId==='todo').map(item=>item.id),[c.id,a.id]);assert.equal(state.todoList.find(item=>item.id===b.id).tabId,work.id);
+});
+
+test('editable tabs can be reordered and the order survives restart',t=>{
+  const {repo,reopen}=fixture(t);const work=repo.command('addTab',{name:'工作'}).tabs.find(tab=>tab.name==='工作');const life=repo.command('addTab',{name:'生活'}).tabs.find(tab=>tab.name==='生活');
+  const state=repo.command('reorderTabs',{ids:[life.id,'todo',work.id]});assert.deepEqual(state.tabs.map(tab=>tab.id),[life.id,'todo',work.id]);assert.deepEqual(reopen().snapshot().tabs.map(tab=>tab.id),[life.id,'todo',work.id]);
+  assert.throws(()=>repo.command('reorderTabs',{ids:['todo',work.id,work.id]}),/排序/);
+});
+
+test('completed tasks remember their source tab and restore it after tab deletion',t=>{
+  const {repo}=fixture(t);const tab=repo.command('addTab',{name:'客户'}).tabs.find(item=>item.name==='客户');const id=repo.command('add',{content:'报价',tabId:tab.id}).todoList.find(item=>item.tabId===tab.id).id;
+  repo.command('complete',{id});repo.command('deleteTab',{id:tab.id});const state=repo.command('restoreDone',{id});assert.ok(state.tabs.some(item=>item.id===tab.id&&item.name==='客户'));assert.ok(state.todoList.some(item=>item.id===id&&item.tabId===tab.id));
+});

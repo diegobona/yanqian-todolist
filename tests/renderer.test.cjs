@@ -71,3 +71,18 @@ test('hide, quit and route leave have a save guard and recover resets renderer l
  assert.ok(app.includes('window:unlocked'),'recovered window must clear renderer mask');
  const {c}=component('Todo.vue');assert.equal(typeof c.beforeRouteLeave,'function');
 });
+test('navigation uses editable todo tabs with one permanent completed tab',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
+ assert.ok(app.includes('v-for="tab in tabs"'));assert.ok(app.includes('>已完成</router-link'));assert.ok(app.includes('aria-label="新建清单"'));assert.ok(app.includes('startTabName'));assert.ok(app.includes('deleteTab'));
+ assert.ok(!app.includes('>Todo</router-link>'));assert.ok(!app.includes('>Done</router-link>'));
+});
+test('tab navigation supports drag ordering separators and overflow arrows',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
+ assert.ok(app.includes('<draggable'));assert.ok(app.includes('@end="reorderTabs"'));assert.ok(app.includes('reorderTabs'));
+ assert.ok(app.includes('tab-scroll-left'));assert.ok(app.includes('tab-scroll-right'));assert.ok(app.includes('updateTabOverflow'));
+ assert.match(app,/\.tab-shell\s*\{[\s\S]*?border-right:/);assert.match(app,/\.done-tab\s*\{[\s\S]*?border-right:/);
+});
+test('changing routes closes the tab action row',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
+ assert.match(app,/"\$route\.fullPath"\(\)\s*\{[\s\S]*?closeTabActions\(\)/);
+});

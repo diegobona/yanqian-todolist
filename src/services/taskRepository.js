@@ -32,6 +32,27 @@ function normalize(raw) {
   )
     throw Error("设置格式无效");
   const state = clone(raw);
+  if (state.tabs !== undefined && !Array.isArray(state.tabs))
+    throw Error("清单格式无效");
+  const tabIds = new Set();
+  state.tabs = (state.tabs === undefined
+    ? [{ id: "todo", name: "待办" }]
+    : state.tabs
+  ).map(tab => {
+    if (
+      !tab ||
+      typeof tab.id !== "string" ||
+      !/^(todo|[a-f0-9]{32})$/.test(tab.id) ||
+      tabIds.has(tab.id) ||
+      typeof tab.name !== "string" ||
+      !tab.name.trim() ||
+      tab.name.length > 30
+    )
+      throw Error("清单格式无效");
+    tabIds.add(tab.id);
+    tab.name = tab.name.trim();
+    return tab;
+  });
   const used = new Set();
   const usedScreenshots = new Set();
   const task = item => {
@@ -87,9 +108,24 @@ function normalize(raw) {
     used.add(item.id);
     return item;
   };
-  state.todoList = state.todoList.map(task);
+  state.todoList = state.todoList.map(item => {
+    task(item);
+    if (item.tabId === undefined) item.tabId = "todo";
+    const tab = state.tabs.find(entry => entry.id === item.tabId);
+    if (!tab) throw Error("待办事项所属清单不存在");
+    item.tabName = tab.name;
+    return item;
+  });
   state.doneList = state.doneList.map(item => {
     task(item);
+    if (item.tabId === undefined) item.tabId = "todo";
+    if (typeof item.tabId !== "string") throw Error("事项清单格式无效");
+    if (item.tabName === undefined)
+      item.tabName =
+        (state.tabs.find(entry => entry.id === item.tabId) || {}).name ||
+        "待办";
+    if (typeof item.tabName !== "string" || !item.tabName.trim())
+      throw Error("事项清单格式无效");
     if (typeof item.done_date !== "string" || !item.done_date) {
       item.done_date =
         typeof item.done_datetime === "string"
@@ -104,6 +140,14 @@ function normalize(raw) {
     if (!Number.isSafeInteger(entry.index) || entry.index < 0)
       throw Error("回收站位置无效");
     task(entry.task);
+    if (entry.task.tabId === undefined) entry.task.tabId = "todo";
+    if (entry.task.tabName === undefined) entry.task.tabName = "待办";
+    if (
+      typeof entry.task.tabId !== "string" ||
+      typeof entry.task.tabName !== "string" ||
+      !entry.task.tabName.trim()
+    )
+      throw Error("回收站清单格式无效");
     return entry;
   });
   state.settings = state.settings || {};
@@ -337,9 +381,26 @@ class TaskRepository {
         throw Error("事项内容无效或过长");
       return value;
     };
+    const tabName = value => {
+      if (typeof value !== "string" || !value.trim() || value.length > 30)
+        throw Error("清单名称不能为空，且不能超过 30 个字");
+      return value.trim();
+    };
+    const locateTab = id => {
+      const index = next.tabs.findIndex(tab => tab.id === id);
+      if (index < 0) throw Error("清单不存在，已完成清单不可修改或删除");
+      return index;
+    };
+    const ensureTaskTab = item => {
+      if (next.tabs.some(tab => tab.id === item.tabId)) return;
+      next.tabs.push({ id: item.tabId, name: tabName(item.tabName || "待办") });
+    };
     let destructive = false;
     switch (action) {
       case "add": {
+        const tabId = payload.tabId || (next.tabs[0] && next.tabs[0].id);
+        const tab = next.tabs.find(item => item.id === tabId);
+        if (!tab) throw Error("请先新建一个待办清单");
         const now = stamp();
         next.todoList.push({
           id: uid(),
@@ -348,8 +409,53 @@ class TaskRepository {
           todo_datetime: now,
           updated_at: now,
           hidden: false,
-          screenshots: []
+          screenshots: [],
+          tabId: tab.id,
+          tabName: tab.name
         });
+        break;
+      }
+      case "addTab": {
+        next.tabs.push({ id: uid(), name: tabName(payload.name || "新清单") });
+        break;
+      }
+      case "renameTab": {
+        const tab = next.tabs[locateTab(payload.id)];
+        tab.name = tabName(payload.name);
+        for (const item of allTasks(next))
+          if (item.tabId === tab.id) item.tabName = tab.name;
+        break;
+      }
+      case "deleteTab": {
+        const index = locateTab(payload.id);
+        const tab = next.tabs[index];
+        const removed = [];
+        next.todoList.forEach((item, itemIndex) => {
+          if (item.tabId === tab.id) removed.push({ item, itemIndex });
+        });
+        next.todoList = next.todoList.filter(item => item.tabId !== tab.id);
+        for (const entry of removed.reverse())
+          next.trashList.unshift({
+            task: entry.item,
+            list: "todoList",
+            index: entry.itemIndex,
+            deleted_at: stamp()
+          });
+        next.tabs.splice(index, 1);
+        destructive = true;
+        break;
+      }
+      case "reorderTabs": {
+        const ids = payload.ids;
+        if (
+          !Array.isArray(ids) ||
+          ids.length !== next.tabs.length ||
+          new Set(ids).size !== ids.length ||
+          ids.some(id => !next.tabs.some(tab => tab.id === id))
+        )
+          throw Error("清单排序已变化，请重试");
+        const byId = new Map(next.tabs.map(tab => [tab.id, tab]));
+        next.tabs = ids.map(id => byId.get(id));
         break;
       }
       case "update": {
@@ -378,15 +484,22 @@ class TaskRepository {
       }
       case "reorder": {
         const ids = payload.ids;
+        const tabId = payload.tabId || (next.tabs[0] && next.tabs[0].id);
+        const indexes = next.todoList
+          .map((item, index) => (item.tabId === tabId ? index : -1))
+          .filter(index => index >= 0);
+        const current = indexes.map(index => next.todoList[index]);
         if (
           !Array.isArray(ids) ||
-          ids.length !== next.todoList.length ||
+          ids.length !== current.length ||
           new Set(ids).size !== ids.length ||
-          ids.some(id => !next.todoList.some(t => t.id === id))
+          ids.some(id => !current.some(t => t.id === id))
         )
           throw Error("排序已变化，请重试");
-        const byId = new Map(next.todoList.map(item => [item.id, item]));
-        next.todoList = ids.map(id => byId.get(id));
+        const byId = new Map(current.map(item => [item.id, item]));
+        indexes.forEach((index, order) => {
+          next.todoList[index] = byId.get(ids[order]);
+        });
         break;
       }
       case "complete": {
@@ -394,6 +507,8 @@ class TaskRepository {
         if (!next.todoList[index].content.trim())
           throw Error("空白事项不能完成");
         const item = next.todoList.splice(index, 1)[0];
+        const sourceTab = next.tabs.find(tab => tab.id === item.tabId);
+        if (sourceTab) item.tabName = sourceTab.name;
         const now = stamp();
         Object.assign(item, {
           done_date: now.slice(0, 10),
@@ -419,6 +534,7 @@ class TaskRepository {
         delete item.done_date;
         delete item.done_datetime;
         item.updated_at = stamp();
+        ensureTaskTab(item);
         next.todoList.splice(
           Math.max(0, Math.min(index, next.todoList.length)),
           0,
@@ -458,6 +574,7 @@ class TaskRepository {
         );
         if (index < 0) throw Error("回收站记录已变化");
         const entry = next.trashList.splice(index, 1)[0];
+        if (entry.list === "todoList") ensureTaskTab(entry.task);
         next[entry.list].splice(
           Math.max(0, Math.min(entry.index, next[entry.list].length)),
           0,

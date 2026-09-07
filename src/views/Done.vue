@@ -10,7 +10,7 @@
             :class="{ concealed: done.hidden }"
             :title="done.hidden ? '事项已隐藏' : done.content"
           >
-            {{ done.hidden ? "••••••" : done.content }}
+            {{ done.hidden ? "••••••" : previewText(done.content) }}
           </p>
           <i
             :class="[
@@ -53,6 +53,10 @@ export default {
     return { groups: [], error: "", expandedId: "" };
   },
   methods: {
+    previewText(content) {
+      const chars = Array.from(content || "");
+      return chars.length > 100 ? chars.slice(0, 100).join("") + "…" : content;
+    },
     dateLabel(value) {
       return /^\d{4}[/-]\d{2}[/-]\d{2}$/.test(value)
         ? getDateStr(value)
@@ -160,7 +164,8 @@ export default {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 14px;
 }
 .concealed {

@@ -1,10 +1,16 @@
 <template>
   <div class="settings">
+    <div class="product-identity">
+      <span class="product-name">眼前</span>
+      <span class="product-version">版本 {{ version }}</span>
+    </div>
     <h2>设置</h2>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" class="message" role="status">{{ message }}</p>
     <h3>数据</h3>
     <p class="hint">事项自动保存在这台电脑上。</p>
+    <p class="hint">保存位置</p>
+    <p class="data-directory">{{ directory }}</p>
     <div class="actions">
       <button :disabled="busy" @click="run('export')">导出数据</button>
       <button :disabled="busy" @click="run('import')">导入数据</button>
@@ -17,7 +23,7 @@
       <span :title="entry.task.content"
         >{{ entry.task.content || "空白草稿"
         }}<small
-          >{{ entry.list === "doneList" ? "已完成" : "待办" }} ·
+          >{{ entry.list === "doneList" ? "已完成" : entry.task.tabName }} ·
           {{ entry.deleted_at }}</small
         ></span
       >
@@ -27,13 +33,16 @@
 </template>
 <script>
 import taskClient from "@/utils/taskClient";
+import pkg from "../../package.json";
 export default {
   name: "Settings",
   data() {
     return {
+      version: pkg.version,
       error: "",
       message: "",
       trash: [],
+      directory: "",
       busy: false
     };
   },
@@ -42,6 +51,7 @@ export default {
       try {
         const state = taskClient.snapshot();
         this.trash = state.trashList;
+        this.directory = taskClient.metadata().directory;
       } catch (error) {
         this.error = error.message;
       }
@@ -82,6 +92,33 @@ export default {
 .settings {
   padding: 0 15px 20px;
   font-size: 12px;
+}
+.product-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0 16px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.product-name {
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+    sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #d5e8dc;
+}
+.product-version {
+  font-size: 11px;
+  color: #9fa9a3;
+}
+.data-directory {
+  overflow-wrap: anywhere;
+  user-select: text;
+  color: #dce7e0;
+  line-height: 1.6;
+  margin: 4px 0 10px;
 }
 h2 {
   font-size: 16px;

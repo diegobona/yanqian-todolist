@@ -228,6 +228,12 @@ test('empty clipboard and hidden task reject screenshot attachment', async t => 
   assert.equal(result.ok, false);assert.match(result.error, /隐藏/);
 });
 
+test('tab deletion is confirmed in main process and moves its tasks to trash',async t=>{
+  const f=await launch(t);const added=f.command('addTab',{name:'工作'});const tab=added.tabs.find(item=>item.name==='工作');const task=f.command('add',{content:'keep recoverable',tabId:tab.id}).todoList.find(item=>item.tabId===tab.id);
+  const result=await f.invoke('app:action',{action:'deleteTab',payload:{id:tab.id}});assert.equal(result.ok,true,result.error);assert.ok(!result.value.tabs.some(item=>item.id===tab.id));assert.equal(result.value.trashList[0].task.id,task.id);
+  const completed=await f.invoke('app:action',{action:'deleteTab',payload:{id:'done'}});assert.equal(completed.ok,false);assert.match(completed.error,/已完成/);
+});
+
 test('second instance recovers the actual main window without resetting saved valid coordinates', async t => {
   const savedBounds = { x: -1450, y: 110, width: 550, height: 750 };
   const f = await launch(t, { savedBounds });

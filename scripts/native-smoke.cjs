@@ -60,7 +60,15 @@ app.on("browser-window-created", (event, win) => {
     };
     const route = async href => {
       await evaluate(
-        href => document.querySelector('a[href="' + href + '"]').click(),
+        href => {
+          const selector =
+            href === "#/"
+              ? '.tab-strip a[href^="#/?tab="]'
+              : 'a[href="' + href + '"]';
+          const node = document.querySelector(selector);
+          if (!node) throw Error("Missing route " + selector);
+          node.click();
+        },
         href
       );
       await pause(100);
@@ -103,6 +111,7 @@ app.on("browser-window-created", (event, win) => {
       }
       if (phase === "verify") {
         const persisted = await snapshot();
+        assert.deepStrictEqual(persisted.tabs, [{ id: "todo", name: "待办" }]);
         assert.equal(persisted.todoList.length, 1);
         assert.equal(persisted.doneList.length, 1);
         assert.equal(persisted.trashList.length, 0);
@@ -135,11 +144,94 @@ app.on("browser-window-created", (event, win) => {
         assert(fs.readdirSync(path.join(directory, "backups")).length > 0);
         record("restart-persistence-and-bounds", "passed");
       } else {
+        assert.deepStrictEqual((await snapshot()).tabs, [
+          { id: "todo", name: "待办" }
+        ]);
+        await click(".add-tab");
+        await evaluate(() => {
+          const input = document.querySelector('input[aria-label="清单名称"]');
+          if (!input) throw Error("Missing tab name editor");
+          input.value = "工作";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+          );
+        });
+        await waitFor(
+          async () => (await snapshot()).tabs.some(tab => tab.name === "工作"),
+          "renamed tab"
+        );
+        const workTab = (await snapshot()).tabs.find(tab => tab.name === "工作");
+        await click(".tab-more");
+        await route("#/");
+        assert.equal(
+          await evaluate(() => !!document.querySelector(".tab-actions")),
+          false,
+          "changing tabs must close the previous tab action row"
+        );
+        await evaluate(id => {
+          const node = document.querySelector(`[data-tab-id="${id}"] a`);
+          if (!node) throw Error("Missing work tab");
+          node.click();
+        }, workTab.id);
+        await pause(100);
+        await click(".tab-more");
+        dialog.showMessageBox = async () => ({ response: 1 });
+        await click(".tab-actions button:last-child");
+        await waitFor(
+          async () => (await snapshot()).tabs.length === 1,
+          "deleted tab"
+        );
+        assert.deepStrictEqual((await snapshot()).tabs, [
+          { id: "todo", name: "待办" }
+        ]);
+        const extraTabIds = [];
+        for (let index = 1; index <= 6; index++) {
+          const next = await command("addTab", { name: `清单${index}` });
+          extraTabIds.push(next.tabs[next.tabs.length - 1].id);
+        }
+        await evaluate(() => window.dispatchEvent(new Event("tasks:changed")));
+        await waitFor(
+          async () =>
+            await evaluate(
+              () =>
+                getComputedStyle(document.querySelector(".tab-scroll-right"))
+                  .display !== "none"
+            ),
+          "tab overflow arrows"
+        );
+        const beforeScroll = await evaluate(
+          () => document.querySelector(".tab-strip").scrollLeft
+        );
+        await click(".tab-scroll-right");
+        await waitFor(
+          async () =>
+            (await evaluate(
+              () => document.querySelector(".tab-strip").scrollLeft
+            )) > beforeScroll,
+          "tabs to scroll right"
+        );
+        let ordered = await snapshot();
+        const originalOrder = ordered.tabs.map(tab => tab.id);
+        ordered = await command("reorderTabs", {
+          ids: [...originalOrder].reverse()
+        });
+        assert.deepStrictEqual(
+          ordered.tabs.map(tab => tab.id),
+          [...originalOrder].reverse()
+        );
+        await command("reorderTabs", { ids: originalOrder });
+        for (const id of extraTabIds) await command("deleteTab", { id });
+        await evaluate(() => window.dispatchEvent(new Event("tasks:changed")));
+        record(
+          "native-tab-add-rename-delete-reorder-overflow-and-menu-close",
+          "passed"
+        );
         for (const text of ["中文输入离开保存", "排序后完成测试"]) {
           await click(".root");
           await evaluate(text => {
             const input = document.querySelector(
-              'input[aria-label="编辑事项"]'
+              'textarea[aria-label="编辑事项"]'
             );
             input.value = text;
             input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -266,6 +358,18 @@ app.on("browser-window-created", (event, win) => {
           "native-json-roundtrip-excel-and-cancel",
           "passed (file pickers use fixture paths)"
         );
+        const nativeScreen = require('electron').screen;
+        const originalCursor = nativeScreen.getCursorScreenPoint;
+        const area = nativeScreen.getPrimaryDisplay().workArea;
+        win.setBounds({ x: area.x, y: area.y + 100, width: 400, height: 360 });
+        nativeScreen.getCursorScreenPoint = () => ({ x: area.x + area.width - 20, y: area.y + 20 });
+        await waitFor(() => win.getBounds().width === 12, 'edge collapse', 5000);
+        assert(await evaluate(() => !!document.querySelector('.dock-handle')));
+        const handle = win.getBounds();
+        nativeScreen.getCursorScreenPoint = () => ({ x: handle.x + 3, y: handle.y + 3 });
+        await waitFor(() => win.getBounds().width === 400, 'edge expand', 3000);
+        nativeScreen.getCursorScreenPoint = originalCursor;
+        record('native-edge-collapse-and-hover-expand', 'passed');
         win.setBounds({ x: 120, y: 120, width: 400, height: 360 });
         await pause(200);
         await evaluate(() =>

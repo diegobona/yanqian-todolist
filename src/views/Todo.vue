@@ -32,16 +32,21 @@
             @click.stop
             @change.stop="done($event, todo.id)"
           />
-          <p v-if="todo.id !== editId" :class="{ concealed: todo.hidden }">
+          <p
+            v-if="todo.id !== editId"
+            :class="{ concealed: todo.hidden }"
+            :title="todo.hidden ? '事项已隐藏' : todo.content"
+          >
             {{ index + 1 }}.{{
               todo.hidden
                 ? "••••••"
-                : todo.content || "空白草稿（点击继续编辑）"
+                : previewText(todo.content) || "空白草稿（点击继续编辑）"
             }}
           </p>
           <div class="edit" v-else>
-            <input
+            <textarea
               ref="editor"
+              rows="1"
               v-model="draft"
               v-focus
               @input="persistInput"
@@ -49,13 +54,14 @@
               @click.stop
               @dblclick.stop
               @keydown.esc="cancel($event)"
-              @keydown.enter="edited($event)"
+              @keydown.ctrl.s.prevent.stop="edited($event)"
+              @keydown.meta.s.prevent.stop="edited($event)"
               spellcheck="false"
               aria-label="编辑事项"
             />
             <i
               class="iconfont icon-select"
-              title="保存"
+              title="保存（Ctrl+S）"
               @click.stop="edited"
             ></i>
             <i
@@ -88,6 +94,9 @@
             @click.stop="toggleVisibility(todo)"
           ></i>
         </div>
+        <p v-if="todo.id === editId" class="editor-hint" @click.stop>
+          Enter 换行 · Ctrl+S 保存
+        </p>
         <TaskScreenshots
           v-if="!todo.hidden && todo.screenshots && todo.screenshots.length"
           :task="todo"
@@ -128,10 +137,26 @@ export default {
     };
   },
   methods: {
+    previewText(content) {
+      const chars = Array.from(content || "");
+      return chars.length > 100 ? chars.slice(0, 100).join("") + "…" : content;
+    },
+    currentTabId(state) {
+      const requested = this.$route && this.$route.query.tab;
+      return state.tabs.some(tab => tab.id === requested)
+        ? requested
+        : state.tabs[0]
+        ? state.tabs[0].id
+        : "";
+    },
+    setTodoList(state) {
+      const tabId = this.currentTabId(state);
+      this.todoList = state.todoList.filter(todo => todo.tabId === tabId);
+    },
     reload() {
       if (this.editId) return;
       try {
-        this.todoList = taskClient.snapshot().todoList;
+        this.setTodoList(taskClient.snapshot());
         if (!this.todoList.some(item => item.id === this.selectedId))
           this.selectedId = "";
         this.error = "";
@@ -142,7 +167,7 @@ export default {
     apply(action, payload) {
       try {
         const state = taskClient.command(action, payload);
-        this.todoList = state.todoList;
+        this.setTodoList(state);
         this.error = "";
         return state;
       } catch (error) {
@@ -163,9 +188,17 @@ export default {
         this.edited();
         return;
       }
-      const state = this.apply("add", { content: "" });
+      const snapshot = taskClient.snapshot();
+      const tabId = this.currentTabId(snapshot);
+      if (!tabId) {
+        this.setNotice("请先新建一个待办清单");
+        return;
+      }
+      const state = this.apply("add", { content: "", tabId });
       if (!state) return;
-      const item = state.todoList[state.todoList.length - 1];
+      const item = state.todoList
+        .filter(todo => todo.tabId === tabId)
+        .slice(-1)[0];
       this.editId = item.id;
       this.selectedId = item.id;
       this.draft = "";
@@ -177,7 +210,7 @@ export default {
       if (!item || item.hidden || this.drag || (event && event.detail > 1))
         return;
       this.selectedId = id;
-      this.clickTimer = setTimeout(() => this.editing(id), 500);
+      this.editing(id);
     },
     dragStarted() {
       clearTimeout(this.clickTimer);
@@ -195,8 +228,16 @@ export default {
     },
     persistInput(event) {
       if (event && event.target) this.draft = event.target.value;
+      this.resizeEditor();
       if (!this.editId || !this.draft.trim()) return true;
       return !!this.apply("update", { id: this.editId, content: this.draft });
+    },
+    resizeEditor() {
+      const refs = this.$refs.editor;
+      const el = Array.isArray(refs) ? refs[0] : refs;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
     },
     edited(event) {
       if (event && (event.isComposing || event.keyCode === 229)) return false;
@@ -296,7 +337,7 @@ export default {
           list: "todoList",
           taskId
         });
-        this.todoList = taskClient.snapshot().todoList;
+        this.setTodoList(taskClient.snapshot());
         this.expandedId = taskId;
         this.setNotice("截图已添加");
         return true;
@@ -319,7 +360,7 @@ export default {
           screenshotId
         });
         if (value.canceled) return;
-        this.todoList = taskClient.snapshot().todoList;
+        this.setTodoList(taskClient.snapshot());
         const task = this.todoList.find(item => item.id === taskId);
         if (!task || !task.screenshots.length) this.expandedId = "";
       } catch (error) {
@@ -341,10 +382,16 @@ export default {
     },
     sorted() {
       this.drag = false;
-      if (!this.apply("reorder", { ids: this.todoList.map(t => t.id) })) {
+      const state = taskClient.snapshot();
+      if (
+        !this.apply("reorder", {
+          tabId: this.currentTabId(state),
+          ids: this.todoList.map(t => t.id)
+        })
+      ) {
         // Show the persisted order on failure; do not imply the sort was saved.
         try {
-          this.todoList = taskClient.snapshot().todoList;
+          this.setTodoList(taskClient.snapshot());
         } catch (error) {
           this.error = error.message;
         }
@@ -356,9 +403,20 @@ export default {
     this.unregisterFlush = taskClient.registerFlush(() => this.edited());
     window.addEventListener("tasks:changed", this.reload);
     window.addEventListener("paste", this.onPaste);
+    window.addEventListener("resize", this.resizeEditor);
   },
   beforeRouteLeave(to, from, next) {
     next(this.edited() ? undefined : false);
+  },
+  beforeRouteUpdate(to, from, next) {
+    if (!this.edited()) {
+      next(false);
+      return;
+    }
+    this.selectedId = "";
+    this.expandedId = "";
+    next();
+    this.$nextTick(this.reload);
   },
   beforeDestroy() {
     clearTimeout(this.clickTimer);
@@ -366,11 +424,13 @@ export default {
     if (this.unregisterFlush) this.unregisterFlush();
     window.removeEventListener("tasks:changed", this.reload);
     window.removeEventListener("paste", this.onPaste);
+    window.removeEventListener("resize", this.resizeEditor);
   },
   directives: {
     focus: {
       inserted(el) {
         el.focus();
+        el.style.height = `${el.scrollHeight}px`;
       }
     }
   }
@@ -407,9 +467,8 @@ export default {
   flex: 1;
   min-width: 0;
   line-height: 28px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   cursor: pointer;
   user-select: none;
 }
@@ -459,17 +518,32 @@ export default {
   align-items: center;
   min-height: 28px;
 }
-.edit input {
+.edit textarea {
   flex: 1;
   min-width: 0;
   outline: none;
   border: none;
   background: transparent;
   font-size: 16px;
+  font-family: inherit;
+  color: inherit;
+  line-height: 28px;
+  padding: 0;
+  resize: none;
+  overflow: hidden;
+  min-height: 28px;
+  overflow-wrap: anywhere;
 }
 .edit i {
   padding: 0 4px;
   cursor: pointer;
+}
+.editor-hint {
+  margin: 2px 0 6px 23px;
+  font-size: 11px;
+  line-height: 18px;
+  color: #aab6ae;
+  user-select: none;
 }
 .ghost {
   opacity: 0.5;

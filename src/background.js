@@ -21,6 +21,8 @@ import {
   getSafeBounds
 } from "@/services/windowController";
 import pkg from "../package.json";
+import { dockEdge, handleBounds, contains } from "@/services/edgeDock";
+import { prepareDataLocation } from "@/services/dataLocation";
 const isDevelopment = process.env.NODE_ENV !== "production";
 const isTest = process.env.YANQIAN_TEST === "1";
 if (isTest && process.env.YANQIAN_DATA_DIR)
@@ -31,10 +33,93 @@ let readyToQuit = false,
   pendingFlush = null,
   flushId = 0;
 let boundsWarningShown = false;
+let dockTimer,
+  expandedBounds = null,
+  dockBusy = false,
+  lastWindowMove = 0,
+  outsideSince = 0;
+function expandDock() {
+  if (!expandedBounds || !win || win.isDestroyed()) return;
+  const bounds = expandedBounds;
+  expandedBounds = null;
+  win.setMinimumSize(320, 290);
+  win.setBounds(getSafeBounds(bounds, screen));
+  send("window:docked", "");
+  lastWindowMove = Date.now();
+  outsideSince = 0;
+}
+async function checkDock() {
+  if (
+    !win ||
+    win.isDestroyed() ||
+    !win.isVisible() ||
+    win.isMinimized() ||
+    dockBusy ||
+    quitting
+  )
+    return;
+  const bounds = win.getBounds();
+  const point = screen.getCursorScreenPoint();
+  if (expandedBounds) {
+    if (contains(bounds, point)) expandDock();
+    return;
+  }
+  if (contains(bounds, point) || Date.now() - lastWindowMove < 120) {
+    outsideSince = 0;
+    return;
+  }
+  const dock = dockEdge(
+    bounds,
+    screen.getAllDisplays().map(display => display.workArea)
+  );
+  if (!dock) {
+    outsideSince = 0;
+    return;
+  }
+  if (!outsideSince) outsideSince = Date.now();
+  if (Date.now() - outsideSince < 60) return;
+  dockBusy = true;
+  try {
+    if (!(await requestFlush())) {
+      outsideSince = Date.now();
+      return;
+    }
+    if (
+      !win ||
+      win.isDestroyed() ||
+      !win.isVisible() ||
+      win.isMinimized() ||
+      quitting ||
+      contains(win.getBounds(), screen.getCursorScreenPoint()) ||
+      Date.now() - lastWindowMove < 120
+    )
+      return;
+    saveBounds();
+    expandedBounds = { ...bounds };
+    win.setIgnoreMouseEvents(false);
+    send("window:unlocked");
+    send("window:docked", dock.edge);
+    win.setMinimumSize(1, 1);
+    win.setBounds(handleBounds(bounds, dock));
+  } finally {
+    dockBusy = false;
+  }
+}
 const stateFile = () => path.join(app.getPath("userData"), "window-state.json");
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  let locationError;
+  if (!isTest) {
+    try {
+      app.setPath(
+        "userData",
+        prepareDataLocation(app.getPath("appData"), app.getPath("userData"))
+      );
+    } catch (error) {
+      locationError = error;
+    }
+  }
   app.on("second-instance", () => {
     if (controller) controller.recover();
   });
@@ -43,7 +128,10 @@ else {
   ]);
   app
     .whenReady()
-    .then(init)
+    .then(() => {
+      if (locationError) throw locationError;
+      return init();
+    })
     .catch(error => {
       dialog.showErrorBox("眼前无法启动", error.message);
       app.exit(1);
@@ -65,7 +153,10 @@ function shortcutLabel(accelerator) {
 function saveBounds() {
   if (!win || win.isDestroyed() || win.isMinimized()) return;
   try {
-    repository.atomicWrite(stateFile(), JSON.stringify(win.getBounds()));
+    repository.atomicWrite(
+      stateFile(),
+      JSON.stringify(expandedBounds || win.getBounds())
+    );
   } catch (error) {
     if (!boundsWarningShown) {
       boundsWarningShown = true;
@@ -248,6 +339,7 @@ async function init() {
     readSettings: () => repository.snapshot().settings,
     writeSettings: patch => repository.command("settings", patch),
     onShow: () => {
+      expandDock();
       send("window:unlocked");
       saveBounds();
     },
@@ -285,10 +377,12 @@ async function init() {
     win.setIgnoreMouseEvents(!!ignore, { forward: true });
   });
   win.on("move", () => {
+    lastWindowMove = Date.now();
     clearTimeout(boundsTimer);
     boundsTimer = setTimeout(saveBounds, 150);
   });
   win.on("resize", () => {
+    lastWindowMove = Date.now();
     clearTimeout(boundsTimer);
     boundsTimer = setTimeout(saveBounds, 150);
   });
@@ -326,6 +420,7 @@ async function init() {
   for (const name of ["display-removed", "display-metrics-changed"])
     screen.on(name, () => {
       if (win && !win.isDestroyed()) {
+        expandDock();
         win.setBounds(getSafeBounds(win.getBounds(), screen));
         saveBounds();
       }
@@ -344,6 +439,12 @@ async function init() {
     await win.loadURL("app://./index.html");
   }
   controller.recover();
+  dockTimer = setInterval(() => {
+    checkDock().catch(error => {
+      expandDock();
+      send("app:notice", error.message);
+    });
+  }, 30);
   if (repository.recoveryNotice) send("app:notice", repository.recoveryNotice);
   if (!shortcut.ok)
     send(
@@ -362,6 +463,7 @@ app.on("before-quit", event => {
 app.on("will-quit", () => {
   clearTimeout(boundsTimer);
   clearInterval(backupTimer);
+  clearInterval(dockTimer);
   if (controller) controller.dispose();
 });
 app.on("activate", () => {

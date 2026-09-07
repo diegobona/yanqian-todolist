@@ -60,6 +60,28 @@ export function initExtra({ getWindow, controller, requestFlush }) {
       const parent = getWindow();
       let value;
       switch (request.action) {
+        case "deleteTab": {
+          const state = repository.snapshot();
+          const tab = state.tabs.find(item => item.id === request.payload.id);
+          if (!tab) throw Error("清单不存在，已完成清单不可删除");
+          const count = state.todoList.filter(item => item.tabId === tab.id)
+            .length;
+          const choice = await dialog.showMessageBox(parent, {
+            type: "warning",
+            title: "删除清单",
+            message: `删除“${tab.name}”？`,
+            detail: count
+              ? `其中 ${count} 条待办会移到回收站，可以在设置中恢复。`
+              : "此清单中没有待办事项。",
+            buttons: ["取消", "删除"],
+            defaultId: 0,
+            cancelId: 0
+          });
+          if (choice.response !== 1)
+            return { ok: true, value: { canceled: true } };
+          value = repository.command("deleteTab", { id: tab.id });
+          break;
+        }
         case "pasteScreenshot": {
           const { list, taskId } = request.payload || {};
           const state = repository.snapshot();
@@ -216,7 +238,7 @@ export function createTray({ showWindow, hideWindow, showSettings, quit }) {
     { label: "退出", click: quit }
   ];
   tray.setContextMenu(Menu.buildFromTemplate(items));
-  tray.setToolTip("眼前 — 点击恢复窗口");
+  tray.setToolTip("眼前");
   tray.on("click", showWindow);
   tray.on("double-click", showWindow);
   return tray;
