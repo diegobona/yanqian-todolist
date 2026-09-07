@@ -153,10 +153,54 @@
     <div v-if="activeMenuTab" class="tab-actions">
       <span>{{ activeMenuTab.name }}</span>
       <button @click="startTabName(activeMenuTab)">改名</button>
-      <button @click="deleteTab(activeMenuTab)">删除</button>
+      <button @click="askDeleteTab(activeMenuTab, $event)">删除</button>
     </div>
     <div v-if="notice" class="notice" role="alert">
       {{ notice }}<button @click="notice = ''">关闭</button>
+    </div>
+    <div
+      v-if="deleteTabPrompt"
+      class="confirm-overlay"
+      @click.self="closeDeleteTab"
+      @keydown.esc.stop.prevent="closeDeleteTab"
+      @keydown.tab.prevent="cycleDeleteTabFocus"
+    >
+      <div
+        class="confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-tab-title"
+        aria-describedby="delete-tab-description"
+      >
+        <h3 id="delete-tab-title">删除这个清单？</h3>
+        <p class="confirm-name">“{{ deleteTabPrompt.name }}”</p>
+        <p id="delete-tab-description">
+          {{
+            deleteTabPrompt.count
+              ? `其中 ${deleteTabPrompt.count} 条待办会移到回收站，可以在设置中恢复。`
+              : "此清单中没有待办事项。"
+          }}
+        </p>
+        <div class="confirm-actions">
+          <button
+            ref="cancelDeleteTab"
+            type="button"
+            :disabled="deleteTabBusy"
+            @click="closeDeleteTab"
+          >
+            取消
+          </button>
+          <button
+            ref="confirmDeleteTab"
+            class="danger"
+            type="button"
+            :disabled="deleteTabBusy"
+            @click="confirmDeleteTab"
+          >
+            删除清单
+          </button>
+        </div>
+      </div>
     </div>
     <div class="main scrollbar scrollbar-y"><router-view /></div>
   </div>
@@ -178,6 +222,9 @@ export default {
       tabMenuId: "",
       editingTabId: "",
       tabDraft: "",
+      deleteTabPrompt: null,
+      deleteTabFocus: null,
+      deleteTabBusy: false,
       tabsOverflowing: false,
       canScrollLeft: false,
       canScrollRight: false,
@@ -314,13 +361,57 @@ export default {
       const tab = viewport.querySelector(`[data-tab-id="${this.activeTabId}"]`);
       if (tab) tab.scrollIntoView({ block: "nearest", inline: "nearest" });
     },
-    async deleteTab(tab) {
+    askDeleteTab(tab, event) {
       try {
-        const value = await taskClient.action("deleteTab", { id: tab.id });
-        if (value.canceled) return;
+        const state = taskClient.snapshot();
+        const current = state.tabs.find(item => item.id === tab.id);
+        if (!current) throw Error("清单不存在，已完成清单不可删除");
+        this.deleteTabPrompt = {
+          id: current.id,
+          name: current.name,
+          count: state.todoList.filter(item => item.tabId === current.id).length
+        };
+        this.deleteTabFocus = event && event.currentTarget;
+        taskClient.setModal(true);
+        this.$nextTick(() => {
+          if (this.$refs.cancelDeleteTab) this.$refs.cancelDeleteTab.focus();
+        });
+      } catch (error) {
+        this.notice = error.message;
+      }
+    },
+    closeDeleteTab(restoreFocus = true) {
+      if (this.deleteTabBusy) return;
+      const target = this.deleteTabFocus;
+      this.deleteTabPrompt = null;
+      this.deleteTabFocus = null;
+      taskClient.setModal(false);
+      if (restoreFocus && target)
+        this.$nextTick(() => {
+          if (document.body.contains(target)) target.focus();
+        });
+    },
+    cycleDeleteTabFocus() {
+      if (this.deleteTabBusy) return;
+      const target =
+        document.activeElement === this.$refs.cancelDeleteTab
+          ? this.$refs.confirmDeleteTab
+          : this.$refs.cancelDeleteTab;
+      if (target) target.focus();
+    },
+    async confirmDeleteTab() {
+      const prompt = this.deleteTabPrompt;
+      if (!prompt || this.deleteTabBusy) return;
+      this.deleteTabBusy = true;
+      try {
+        const value = await taskClient.action("deleteTab", { id: prompt.id });
+        this.deleteTabBusy = false;
+        this.closeDeleteTab(false);
         this.tabMenuId = "";
         this.reloadTabs(value);
       } catch (error) {
+        this.deleteTabBusy = false;
+        this.closeDeleteTab(false);
         this.notice = error.message;
       }
     },
@@ -428,6 +519,7 @@ export default {
     window.removeEventListener("tasks:changed", this.onTasksChanged);
     window.removeEventListener("beforeunload", this.beforeUnload);
     window.removeEventListener("resize", this.onResize);
+    if (this.deleteTabPrompt) taskClient.setModal(false);
   }
 };
 </script>
@@ -620,6 +712,65 @@ export default {
   padding: 4px 12px;
   font-size: 11px;
   flex-shrink: 0;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-app-region: no-drag;
+}
+.confirm-card {
+  width: 280px;
+  max-width: 100%;
+  padding: 20px;
+  border: 1px solid rgba(220, 235, 226, 0.16);
+  border-radius: 12px;
+  background: #202823;
+  color: #e8eee9;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+}
+.confirm-card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.confirm-card p {
+  margin: 0;
+  color: #abb8af;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.confirm-card .confirm-name {
+  margin-bottom: 7px;
+  color: #e8eee9;
+  overflow-wrap: anywhere;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.confirm-actions button {
+  margin: 0;
+  border: 1px solid #536158;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #e8eee9;
+  background: transparent;
+}
+.confirm-actions .danger {
+  background: #ad4c47;
+  border-color: #ad4c47;
+}
+.confirm-actions button:focus-visible {
+  outline: 2px solid #bad8c7;
+  outline-offset: 2px;
 }
 .notice {
   background: #593824;

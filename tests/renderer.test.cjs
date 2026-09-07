@@ -76,6 +76,15 @@ test('navigation uses editable todo tabs with one permanent completed tab',()=>{
  assert.ok(app.includes('v-for="tab in tabs"'));assert.ok(app.includes('>已完成</router-link'));assert.ok(app.includes('aria-label="新建清单"'));assert.ok(app.includes('startTabName'));assert.ok(app.includes('deleteTab'));
  assert.ok(!app.includes('>Todo</router-link>'));assert.ok(!app.includes('>Done</router-link>'));
 });
+test('tab deletion uses the same in-app confirmation pattern as screenshot deletion',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
+ assert.ok(app.includes('role="alertdialog"'));
+ assert.ok(app.includes('删除这个清单？'));
+ assert.ok(app.includes('askDeleteTab'));
+ assert.ok(app.includes('confirmDeleteTab'));
+ assert.ok(app.includes('taskClient.setModal(true)'));
+ assert.ok(app.includes('@keydown.esc.stop.prevent="closeDeleteTab"'));
+});
 test('tab navigation supports drag ordering separators and overflow arrows',()=>{
  const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
  assert.ok(app.includes('<draggable'));assert.ok(app.includes('@end="reorderTabs"'));assert.ok(app.includes('reorderTabs'));

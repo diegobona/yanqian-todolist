@@ -1,0 +1,53 @@
+{
+  "todoList": [
+    {
+      "id": "ca7dd8182ce150eab74bdcf40e992628",
+      "content": "联系小李",
+      "todo_date": "2026/09/07",
+      "todo_datetime": "2026/09/07 21:35:58",
+      "updated_at": "2026/09/07 21:36:10",
+      "hidden": true,
+      "pinned": false,
+      "screenshots": [],
+      "tabId": "todo",
+      "tabName": "待办"
+    },
+    {
+      "id": "cc69dfa2c9e04cc97462ed2038acff3f",
+      "content": "出差事项",
+      "todo_date": "2026/09/07",
+      "todo_datetime": "2026/09/07 21:37:01",
+      "updated_at": "2026/09/07 21:37:09",
+      "hidden": true,
+      "pinned": false,
+      "screenshots": [
+        {
+          "id": "c2c858363e146ec9519651df4804a65a",
+          "fileName": "c2c858363e146ec9519651df4804a65a.png",
+          "created_at": "2026/09/07 21:37:28",
+          "width": 524,
+          "height": 304,
+          "size": 191580
+        }
+      ],
+      "tabId": "todo",
+      "tabName": "待办"
+    }
+  ],
+  "doneList": [],
+  "settings": {
+    "hideHintSeen": true,
+    "interfaceTransparency": 25,
+    "windowLocked": false
+  },
+  "trashList": [],
+  "schemaVersion": 1,
+  "revision": 573,
+  "lastCompletion": null,
+  "tabs": [
+    {
+      "id": "todo",
+      "name": "待办"
+    }
+  ]
+}

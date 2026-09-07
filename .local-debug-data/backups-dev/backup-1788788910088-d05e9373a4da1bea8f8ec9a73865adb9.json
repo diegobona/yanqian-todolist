@@ -56,12 +56,16 @@
     }
   ],
   "schemaVersion": 1,
-  "revision": 582,
+  "revision": 581,
   "lastCompletion": null,
   "tabs": [
     {
       "id": "todo",
       "name": "待办"
+    },
+    {
+      "id": "6adb5ab46df00340539aacb498afe2cd",
+      "name": "新清单"
     }
   ]
 }

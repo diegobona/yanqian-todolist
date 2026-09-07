@@ -1,31 +1,27 @@
 {
   "todoList": [],
-  "doneList": [],
+  "doneList": [
+    {
+      "id": "ca7dd8182ce150eab74bdcf40e992628",
+      "content": "联系小李",
+      "todo_date": "2026/09/07",
+      "todo_datetime": "2026/09/07 21:35:58",
+      "updated_at": "2026/09/07 21:48:12",
+      "hidden": true,
+      "pinned": false,
+      "screenshots": [],
+      "tabId": "todo",
+      "tabName": "待办",
+      "done_date": "2026/09/07",
+      "done_datetime": "2026/09/07 21:48:12"
+    }
+  ],
   "settings": {
     "hideHintSeen": true,
     "interfaceTransparency": 25,
     "windowLocked": false
   },
   "trashList": [
-    {
-      "task": {
-        "id": "ca7dd8182ce150eab74bdcf40e992628",
-        "content": "联系小李",
-        "todo_date": "2026/09/07",
-        "todo_datetime": "2026/09/07 21:35:58",
-        "updated_at": "2026/09/07 21:48:12",
-        "hidden": true,
-        "pinned": false,
-        "screenshots": [],
-        "tabId": "todo",
-        "tabName": "待办",
-        "done_date": "2026/09/07",
-        "done_datetime": "2026/09/07 21:48:12"
-      },
-      "list": "doneList",
-      "index": 0,
-      "deleted_at": "2026/09/07 21:48:16"
-    },
     {
       "task": {
         "id": "cc69dfa2c9e04cc97462ed2038acff3f",
@@ -56,7 +52,7 @@
     }
   ],
   "schemaVersion": 1,
-  "revision": 582,
+  "revision": 576,
   "lastCompletion": null,
   "tabs": [
     {

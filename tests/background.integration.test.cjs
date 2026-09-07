@@ -115,7 +115,7 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
     },
     dialog: {
       showErrorBox: (title, message) => errors.push({ title, message }),
-      showMessageBox: async () => ({ response: 1 })
+      showMessageBox: async options => { calls.push(['showMessageBox', plain(options)]); return { response: 1 }; }
     },
     shell: { openPath: async () => '' },
     Notification: { isSupported: () => false },
@@ -272,9 +272,9 @@ test('empty clipboard and hidden task reject screenshot attachment', async t => 
   assert.equal(result.ok, false);assert.match(result.error, /隐藏/);
 });
 
-test('tab deletion is confirmed in main process and moves its tasks to trash',async t=>{
+test('confirmed tab deletion does not open a native dialog and moves tasks to trash',async t=>{
   const f=await launch(t);const added=f.command('addTab',{name:'工作'});const tab=added.tabs.find(item=>item.name==='工作');const task=f.command('add',{content:'keep recoverable',tabId:tab.id}).todoList.find(item=>item.tabId===tab.id);
-  const result=await f.invoke('app:action',{action:'deleteTab',payload:{id:tab.id}});assert.equal(result.ok,true,result.error);assert.ok(!result.value.tabs.some(item=>item.id===tab.id));assert.equal(result.value.trashList[0].task.id,task.id);
+  const dialogsBefore=f.calls.filter(call=>call[0]==='showMessageBox').length;const result=await f.invoke('app:action',{action:'deleteTab',payload:{id:tab.id}});assert.equal(result.ok,true,result.error);assert.equal(f.calls.filter(call=>call[0]==='showMessageBox').length,dialogsBefore);assert.ok(!result.value.tabs.some(item=>item.id===tab.id));assert.equal(result.value.trashList[0].task.id,task.id);
   const completed=await f.invoke('app:action',{action:'deleteTab',payload:{id:'done'}});assert.equal(completed.ok,false);assert.match(completed.error,/已完成/);
 });
 
