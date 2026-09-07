@@ -8,10 +8,7 @@
         <router-link draggable="false" to="/done">Done</router-link>
       </div>
       <div class="tools">
-        <router-link
-          to="/settings"
-          class="settings-link"
-          title="备份、回收站与快捷键"
+        <router-link to="/settings" class="settings-link" title="设置"
           >设置</router-link
         >
         <i

@@ -1,5 +1,14 @@
 /* global __static */
-import { app, ipcMain, Tray, Menu, dialog, Notification } from "electron";
+import {
+  app,
+  ipcMain,
+  Tray,
+  Menu,
+  dialog,
+  Notification,
+  clipboard,
+  nativeImage
+} from "electron";
 import DB from "./db";
 import path from "path";
 import pkg from "../../package.json";
@@ -51,6 +60,55 @@ export function initExtra({ getWindow, controller, requestFlush }) {
       const parent = getWindow();
       let value;
       switch (request.action) {
+        case "pasteScreenshot": {
+          const { list, taskId } = request.payload || {};
+          const state = repository.snapshot();
+          const tasks = state[list];
+          const task =
+            Array.isArray(tasks) && tasks.find(item => item.id === taskId);
+          if (!task) throw Error("事项已变化，请刷新后重试");
+          if (task.hidden) throw Error("隐藏事项不能添加截图，请先显示此事项");
+          const image = clipboard.readImage();
+          if (!image || image.isEmpty()) throw Error("剪贴板里没有截图");
+          const size = image.getSize();
+          if (
+            !size ||
+            size.width < 1 ||
+            size.height < 1 ||
+            size.width > 12000 ||
+            size.height > 12000 ||
+            size.width * size.height > 40 * 1000 * 1000
+          )
+            throw Error("截图尺寸过大，请裁剪后重试");
+          value = repository.addScreenshot({
+            list,
+            taskId,
+            png: image.toPNG()
+          });
+          break;
+        }
+        case "readScreenshot": {
+          const bytes = repository.readScreenshot(request.payload || {});
+          const image = nativeImage.createFromBuffer(bytes);
+          if (!image || image.isEmpty()) throw Error("截图文件已损坏");
+          value = `data:image/png;base64,${bytes.toString("base64")}`;
+          break;
+        }
+        case "deleteScreenshot": {
+          const choice = await dialog.showMessageBox(parent, {
+            type: "warning",
+            title: "删除截图",
+            message: "删除这张截图？",
+            detail: "事项本身会保留。",
+            buttons: ["取消", "删除"],
+            defaultId: 0,
+            cancelId: 0
+          });
+          if (choice.response !== 1)
+            return { ok: true, value: { canceled: true } };
+          value = repository.removeScreenshot(request.payload || {});
+          break;
+        }
         case "export": {
           const result = await dialog.showSaveDialog(parent, {
             title: "导出数据",
@@ -96,7 +154,7 @@ export function initExtra({ getWindow, controller, requestFlush }) {
           controller.shortcutError = result.ok ? "" : result.error;
           value = result.ok
             ? "数据已导入"
-            : "数据已导入；快捷键被占用，请在设置中重新选择";
+            : "数据已导入；快捷键不可用，仍可通过托盘找回窗口";
           break;
         }
         case "excel":

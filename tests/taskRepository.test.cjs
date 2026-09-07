@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const modulePath = path.resolve(__dirname, '../src/services/taskRepository.js');
+const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 function fixture(t, raw, io) {
   assert.ok(fs.existsSync(modulePath), 'local repository must exist');
@@ -110,4 +111,51 @@ test('unrecoverable or future-version data is never silently replaced',t=>{
   const {directory,reopen}=fixture(t);const file=path.join(directory,'data.json');fs.writeFileSync(file,'{broken');
   assert.throws(reopen);assert.equal(fs.readFileSync(file,'utf8'),'{broken');
   const future=JSON.stringify({schemaVersion:999,todoList:[],doneList:[]});fs.writeFileSync(file,future);assert.throws(reopen);assert.equal(fs.readFileSync(file,'utf8'),future);
+});
+
+test('screenshots live outside data JSON and follow a task through completion and trash restore',t=>{
+  const {repo,directory,reopen}=fixture(t);const id=add(repo,'with screenshot');
+  const state=repo.addScreenshot({list:'todoList',taskId:id,png:png1x1});
+  const shot=state.todoList[0].screenshots[0];
+  assert.equal(shot.width,1);assert.equal(shot.height,1);assert.equal(shot.size,png1x1.length);
+  assert.deepEqual(repo.readScreenshot({list:'todoList',taskId:id,screenshotId:shot.id}),png1x1);
+  const live=fs.readFileSync(path.join(directory,'data.json'),'utf8');
+  assert.ok(!live.includes(png1x1.toString('base64')),'live JSON must not embed image bytes');
+  assert.ok(fs.existsSync(path.join(directory,'attachments',shot.fileName)));
+  repo.command('complete',{id});
+  assert.deepEqual(reopen().readScreenshot({list:'doneList',taskId:id,screenshotId:shot.id}),png1x1);
+  repo.command('delete',{list:'doneList',id});repo.command('restoreTrash',{id});
+  assert.deepEqual(reopen().readScreenshot({list:'doneList',taskId:id,screenshotId:shot.id}),png1x1);
+});
+
+test('full export and import carry screenshot bytes across data directories',t=>{
+  const first=fixture(t);const id=add(first.repo,'portable');
+  first.repo.addScreenshot({list:'todoList',taskId:id,png:png1x1});
+  const backup=path.join(first.directory,'portable.json');first.repo.exportTo(backup);
+  const exported=JSON.parse(fs.readFileSync(backup,'utf8'));
+  assert.equal(Object.keys(exported.attachmentData).length,1);
+  const second=fixture(t);add(second.repo,'replace me');second.repo.importFrom(backup);
+  const task=second.repo.snapshot().todoList[0];const shot=task.screenshots[0];
+  assert.equal(task.content,'portable');assert.deepEqual(second.repo.readScreenshot({list:'todoList',taskId:task.id,screenshotId:shot.id}),png1x1);
+  assert.notEqual(path.resolve(first.directory,shot.fileName),path.resolve(second.directory,shot.fileName));
+});
+
+test('invalid screenshot data and attachment bundles fail without changing live state',t=>{
+  const {repo,directory}=fixture(t);const id=add(repo,'safe');const before=repo.snapshot();
+  assert.throws(()=>repo.addScreenshot({list:'todoList',taskId:id,png:Buffer.from('not png')}),/PNG|截图/);
+  repo.command('setVisibility',{list:'todoList',id,hidden:true});
+  assert.throws(()=>repo.addScreenshot({list:'todoList',taskId:id,png:png1x1}),/隐藏/);
+  repo.command('setVisibility',{list:'todoList',id,hidden:false});
+  const file=path.join(directory,'bad-attachments.json');
+  fs.writeFileSync(file,JSON.stringify({...before,todoList:[{...before.todoList[0],screenshots:[{id:'missing',fileName:'../../escape.png',created_at:'now',width:1,height:1,size:1}]}],attachmentData:{missing:'%%%'}}));
+  assert.throws(()=>repo.importFrom(file));
+  assert.equal(repo.snapshot().todoList[0].content,'safe');
+  assert.equal(repo.snapshot().todoList[0].screenshots?.length||0,0);
+});
+
+test('failed attachment staging during import leaves current tasks and images untouched',t=>{
+  const source=fixture(t);const sourceId=add(source.repo,'incoming');source.repo.addScreenshot({list:'todoList',taskId:sourceId,png:png1x1});const backup=path.join(source.directory,'bundle.json');source.repo.exportTo(backup);
+  let fail=false;const io=Object.create(fs);io.writeFileSync=(file,...args)=>{if(fail&&String(file).includes(`${path.sep}attachments${path.sep}`))throw Error('attachment disk denied');return fs.writeFileSync(file,...args);};
+  const target=fixture(t,undefined,io);const safeId=add(target.repo,'keep current');target.repo.addScreenshot({list:'todoList',taskId:safeId,png:png1x1});const before=target.repo.snapshot();const oldFiles=fs.readdirSync(path.join(target.directory,'attachments')).sort();fail=true;
+  assert.throws(()=>target.repo.importFrom(backup),/attachment disk denied/);assert.deepEqual(target.repo.snapshot(),before);assert.deepEqual(fs.readdirSync(path.join(target.directory,'attachments')).sort(),oldFiles);assert.deepEqual(target.repo.readScreenshot({list:'todoList',taskId:safeId,screenshotId:before.todoList[0].screenshots[0].id}),png1x1);
 });

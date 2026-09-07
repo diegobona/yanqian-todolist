@@ -3,18 +3,6 @@
     <h2>设置</h2>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" class="message" role="status">{{ message }}</p>
-    <label for="shortcut">显示／隐藏快捷键</label>
-    <div class="row">
-      <input
-        id="shortcut"
-        v-model="accelerator"
-        placeholder="Control+Shift+Space"
-      /><button :disabled="busy" @click="run('shortcut', { accelerator })">
-        保存
-      </button>
-    </div>
-    <p class="hint">例如 Control+Shift+Space。冲突时保留原快捷键。</p>
-    <p v-if="shortcutError" class="error">{{ shortcutError }}</p>
     <h3>数据</h3>
     <p class="hint">事项自动保存在这台电脑上。</p>
     <div class="actions">
@@ -45,8 +33,6 @@ export default {
     return {
       error: "",
       message: "",
-      accelerator: "",
-      shortcutError: "",
       trash: [],
       busy: false
     };
@@ -54,13 +40,7 @@ export default {
   methods: {
     reload() {
       try {
-        const meta = taskClient.metadata();
         const state = taskClient.snapshot();
-        this.accelerator =
-          meta.accelerator ||
-          state.settings.accelerator ||
-          "CommandOrControl+Shift+Space";
-        this.shortcutError = meta.shortcutError;
         this.trash = state.trashList;
       } catch (error) {
         this.error = error.message;
@@ -111,29 +91,18 @@ h3 {
   font-size: 14px;
   margin: 16px 0 6px;
 }
-label {
-  display: block;
-  margin-bottom: 5px;
-}
 .row {
   display: flex;
   gap: 6px;
   align-items: center;
   margin: 5px 0;
 }
-.row input,
 .row span {
   flex: 1;
   min-width: 0;
 }
 .row span {
   overflow-wrap: anywhere;
-}
-input {
-  background: #222;
-  border: 1px solid #999;
-  padding: 5px;
-  border-radius: 3px;
 }
 button {
   background: #333;

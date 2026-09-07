@@ -3,6 +3,11 @@ const path = require("path");
 const crypto = require("crypto");
 const clone = value => JSON.parse(JSON.stringify(value));
 const uid = () => crypto.randomBytes(16).toString("hex");
+const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
+const MAX_SCREENSHOTS_PER_TASK = 20;
+const MAX_SCREENSHOT_PIXELS = 40 * 1000 * 1000;
+const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const pad = n => String(n).padStart(2, "0");
 function stamp() {
   const d = new Date();
@@ -28,6 +33,7 @@ function normalize(raw) {
     throw Error("设置格式无效");
   const state = clone(raw);
   const used = new Set();
+  const usedScreenshots = new Set();
   const task = item => {
     if (
       item &&
@@ -49,6 +55,33 @@ function normalize(raw) {
     if (item.hidden !== undefined && typeof item.hidden !== "boolean")
       throw Error("事项显示状态无效");
     item.hidden = item.hidden === true;
+    if (item.screenshots !== undefined && !Array.isArray(item.screenshots))
+      throw Error("事项截图格式无效");
+    item.screenshots = (item.screenshots || []).map(screenshot => {
+      if (
+        !screenshot ||
+        typeof screenshot.id !== "string" ||
+        !/^[a-f0-9]{32}$/.test(screenshot.id) ||
+        usedScreenshots.has(screenshot.id) ||
+        screenshot.fileName !== `${screenshot.id}.png` ||
+        typeof screenshot.created_at !== "string" ||
+        !Number.isSafeInteger(screenshot.width) ||
+        !Number.isSafeInteger(screenshot.height) ||
+        screenshot.width < 1 ||
+        screenshot.height < 1 ||
+        screenshot.width > 12000 ||
+        screenshot.height > 12000 ||
+        screenshot.width * screenshot.height > MAX_SCREENSHOT_PIXELS ||
+        !Number.isSafeInteger(screenshot.size) ||
+        screenshot.size < 1 ||
+        screenshot.size > MAX_SCREENSHOT_BYTES
+      )
+        throw Error("事项截图格式无效");
+      usedScreenshots.add(screenshot.id);
+      return screenshot;
+    });
+    if (item.screenshots.length > MAX_SCREENSHOTS_PER_TASK)
+      throw Error(`每个事项最多添加 ${MAX_SCREENSHOTS_PER_TASK} 张截图`);
     if (typeof item.id !== "string" || !item.id || used.has(item.id))
       item.id = uid();
     used.add(item.id);
@@ -98,10 +131,12 @@ class TaskRepository {
       filename === "data-dev.json" ? "backups-dev" : "backups"
     );
     this.safetyDir = path.join(directory, "safety");
+    this.attachmentDir = path.join(directory, "attachments");
     this.lastBackup = 0;
     this.fs.mkdirSync(directory, { recursive: true });
     this.fs.mkdirSync(this.backupDir, { recursive: true });
     this.fs.mkdirSync(this.safetyDir, { recursive: true });
+    this.fs.mkdirSync(this.attachmentDir, { recursive: true });
     if (!this.fs.existsSync(this.file)) {
       if (
         this.listBackups().length ||
@@ -183,6 +218,79 @@ class TaskRepository {
   snapshot() {
     return clone(this.state);
   }
+  task(list, taskId, state = this.state) {
+    if (!["todoList", "doneList"].includes(list)) throw Error("列表无效");
+    const item = state[list].find(task => task.id === taskId);
+    if (!item) throw Error("事项已变化，请刷新后重试");
+    return item;
+  }
+  addScreenshot({ list, taskId, png }) {
+    const item = this.task(list, taskId);
+    if (item.hidden) throw Error("隐藏事项不能添加截图，请先显示此事项");
+    if (item.screenshots.length >= MAX_SCREENSHOTS_PER_TASK)
+      throw Error(`每个事项最多添加 ${MAX_SCREENSHOTS_PER_TASK} 张截图`);
+    const bytes = Buffer.isBuffer(png) ? png : Buffer.from(png || []);
+    const dimensions = inspectPng(bytes);
+    const screenshotId = uid();
+    const screenshot = {
+      id: screenshotId,
+      fileName: `${screenshotId}.png`,
+      created_at: stamp(),
+      width: dimensions.width,
+      height: dimensions.height,
+      size: bytes.length
+    };
+    const file = this.attachmentPath(screenshot.fileName);
+    this.atomicWrite(file, bytes);
+    try {
+      const next = this.snapshot();
+      this.task(list, taskId, next).screenshots.push(screenshot);
+      next.revision += 1;
+      return this.commit(next);
+    } catch (error) {
+      try {
+        this.fs.unlinkSync(file);
+      } catch (cleanupError) {
+        /* a generated orphan is harmless and never referenced */
+      }
+      throw error;
+    }
+  }
+  readScreenshot({ list, taskId, screenshotId }) {
+    const item = this.task(list, taskId);
+    if (item.hidden) throw Error("事项已隐藏");
+    const screenshot = item.screenshots.find(
+      entry => entry.id === screenshotId
+    );
+    if (!screenshot) throw Error("截图已变化，请刷新后重试");
+    const bytes = this.fs.readFileSync(
+      this.attachmentPath(screenshot.fileName)
+    );
+    const dimensions = inspectPng(bytes);
+    if (
+      bytes.length !== screenshot.size ||
+      dimensions.width !== screenshot.width ||
+      dimensions.height !== screenshot.height
+    )
+      throw Error("截图文件已损坏");
+    return bytes;
+  }
+  removeScreenshot({ list, taskId, screenshotId }) {
+    const item = this.task(list, taskId);
+    if (item.hidden) throw Error("事项已隐藏");
+    const index = item.screenshots.findIndex(
+      entry => entry.id === screenshotId
+    );
+    if (index < 0) throw Error("截图已变化，请刷新后重试");
+    const next = this.snapshot();
+    this.task(list, taskId, next).screenshots.splice(index, 1);
+    next.revision += 1;
+    return this.commit(next, true);
+  }
+  attachmentPath(fileName) {
+    if (!/^[a-f0-9]{32}\.png$/.test(fileName)) throw Error("截图文件名无效");
+    return path.join(this.attachmentDir, fileName);
+  }
   listBackups() {
     return this.fs
       .readdirSync(this.backupDir)
@@ -239,7 +347,8 @@ class TaskRepository {
           todo_date: now.slice(0, 10),
           todo_datetime: now,
           updated_at: now,
-          hidden: false
+          hidden: false,
+          screenshots: []
         });
         break;
       }
@@ -374,20 +483,190 @@ class TaskRepository {
       path.resolve(file).toLowerCase() === path.resolve(this.file).toLowerCase()
     )
       throw Error("请另选备份文件，不能覆盖正在使用的数据文件");
-    this.atomicWrite(file, JSON.stringify(this.state, null, 2));
+    const exported = this.snapshot();
+    exported.attachmentData = {};
+    for (const item of allTasks(exported)) {
+      for (const screenshot of item.screenshots) {
+        const bytes = this.fs.readFileSync(
+          this.attachmentPath(screenshot.fileName)
+        );
+        const dimensions = inspectPng(bytes);
+        if (
+          bytes.length !== screenshot.size ||
+          dimensions.width !== screenshot.width ||
+          dimensions.height !== screenshot.height
+        )
+          throw Error("截图文件已损坏，导出已取消");
+        exported.attachmentData[screenshot.id] = bytes.toString("base64");
+      }
+    }
+    this.atomicWrite(file, JSON.stringify(exported, null, 2));
   }
   importFrom(file) {
     const size = this.fs.statSync(file).size;
-    if (size > 50 * 1024 * 1024) throw Error("备份文件超过 50 MB，请检查文件");
-    const state = normalize(JSON.parse(this.fs.readFileSync(file, "utf8")));
-    this.safetyCopy("before-import", JSON.stringify(this.state, null, 2));
-    return this.commit(state, true);
+    if (size > MAX_IMPORT_BYTES) throw Error("备份文件超过 200 MB，请检查文件");
+    const prepared = prepareImport(
+      JSON.parse(this.fs.readFileSync(file, "utf8")),
+      this.attachmentDir,
+      this.fs,
+      true
+    );
+    const written = [];
+    try {
+      for (const attachment of prepared.attachments) {
+        const target = this.attachmentPath(attachment.fileName);
+        this.atomicWrite(target, attachment.bytes);
+        written.push(target);
+      }
+      this.safetyCopy("before-import", JSON.stringify(this.state, null, 2));
+      return this.commit(prepared.state, true);
+    } catch (error) {
+      for (const target of written) {
+        try {
+          this.fs.unlinkSync(target);
+        } catch (cleanupError) {
+          /* best effort for unreferenced staged files */
+        }
+      }
+      throw error;
+    }
   }
+}
+function allTasks(state) {
+  return [
+    ...state.todoList,
+    ...state.doneList,
+    ...(state.trashList || []).map(entry => entry.task)
+  ];
+}
+function inspectPng(value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value || []);
+  if (
+    bytes.length < 45 ||
+    bytes.length > MAX_SCREENSHOT_BYTES ||
+    !bytes.slice(0, 8).equals(PNG_SIGNATURE)
+  )
+    throw Error("截图必须是有效的 PNG 图片，且不能超过 15 MB");
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let hasImageData = false;
+  let ended = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (end > bytes.length) throw Error("PNG 截图结构已损坏");
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    if (offset === 8) {
+      if (type !== "IHDR" || length !== 13) throw Error("PNG 截图缺少尺寸信息");
+      width = bytes.readUInt32BE(offset + 8);
+      height = bytes.readUInt32BE(offset + 12);
+    }
+    if (type === "IDAT") hasImageData = true;
+    if (type === "IEND") {
+      if (length !== 0 || end !== bytes.length)
+        throw Error("PNG 截图结尾已损坏");
+      ended = true;
+      break;
+    }
+    offset = end;
+  }
+  if (
+    !ended ||
+    !hasImageData ||
+    width < 1 ||
+    height < 1 ||
+    width > 12000 ||
+    height > 12000 ||
+    width * height > MAX_SCREENSHOT_PIXELS
+  )
+    throw Error("PNG 截图无效或尺寸过大");
+  return { width, height };
+}
+function decodeBase64(value) {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(value)
+  )
+    throw Error("截图备份内容无效");
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.toString("base64") !== value) throw Error("截图备份内容无效");
+  return bytes;
+}
+function prepareImport(raw, attachmentDir, io, rewrite) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    throw Error("备份格式无效");
+  const stateRaw = clone(raw);
+  const attachmentData = stateRaw.attachmentData;
+  delete stateRaw.attachmentData;
+  const state = normalize(stateRaw);
+  const refs = allTasks(state).flatMap(item => item.screenshots);
+  if (!refs.length) {
+    if (
+      attachmentData !== undefined &&
+      (!attachmentData ||
+        typeof attachmentData !== "object" ||
+        Array.isArray(attachmentData) ||
+        Object.keys(attachmentData).length)
+    )
+      throw Error("备份包含没有对应事项的截图");
+    return { state, attachments: [] };
+  }
+  const payloadKeys =
+    attachmentData &&
+    typeof attachmentData === "object" &&
+    !Array.isArray(attachmentData)
+      ? Object.keys(attachmentData)
+      : [];
+  const refIds = new Set(refs.map(screenshot => screenshot.id));
+  if (attachmentData !== undefined && !payloadKeys.length)
+    throw Error("备份缺少事项所引用的截图");
+  if (
+    payloadKeys.length &&
+    (payloadKeys.length !== refs.length ||
+      payloadKeys.some(id => !refIds.has(id)))
+  )
+    throw Error("备份中的截图与事项不一致");
+  const attachments = [];
+  for (const item of allTasks(state)) {
+    item.screenshots = item.screenshots.map(screenshot => {
+      let bytes;
+      if (payloadKeys.length)
+        bytes = decodeBase64(attachmentData[screenshot.id]);
+      else
+        bytes = io.readFileSync(
+          safeAttachmentPath(attachmentDir, screenshot.fileName)
+        );
+      const dimensions = inspectPng(bytes);
+      if (
+        bytes.length !== screenshot.size ||
+        dimensions.width !== screenshot.width ||
+        dimensions.height !== screenshot.height
+      )
+        throw Error("备份中的截图文件已损坏");
+      if (!rewrite) return screenshot;
+      const id = uid();
+      const next = { ...screenshot, id, fileName: `${id}.png` };
+      attachments.push({ fileName: next.fileName, bytes });
+      return next;
+    });
+  }
+  return { state: normalize(state), attachments };
+}
+function safeAttachmentPath(directory, fileName) {
+  if (!/^[a-f0-9]{32}\.png$/.test(fileName)) throw Error("截图文件名无效");
+  return path.join(directory, fileName);
 }
 function atomicWrite(io, file, text) {
   const temp = `${file}.${uid()}.tmp`;
   try {
-    io.writeFileSync(temp, text, { encoding: "utf8", flag: "wx" });
+    io.writeFileSync(
+      temp,
+      text,
+      Buffer.isBuffer(text) ? { flag: "wx" } : { encoding: "utf8", flag: "wx" }
+    );
     const fd = io.openSync(temp, "r+");
     try {
       io.fsyncSync(fd);
@@ -406,22 +685,46 @@ function restoreDataFile({
   source,
   fs: io = fs
 }) {
-  if (io.statSync(source).size > 50 * 1024 * 1024)
-    throw Error("备份文件超过 50 MB");
-  const state = normalize(JSON.parse(io.readFileSync(source, "utf8")));
+  if (io.statSync(source).size > MAX_IMPORT_BYTES)
+    throw Error("备份文件超过 200 MB");
+  const attachmentDir = path.join(directory, "attachments");
+  io.mkdirSync(attachmentDir, { recursive: true });
+  const prepared = prepareImport(
+    JSON.parse(io.readFileSync(source, "utf8")),
+    attachmentDir,
+    io,
+    true
+  );
   const target = path.join(directory, filename);
   const safety = path.join(directory, "safety");
   io.mkdirSync(safety, { recursive: true });
-  if (io.existsSync(target))
-    atomicWrite(
-      io,
-      path.join(
-        safety,
-        filename + "-" + Date.now() + "-startup-restore-" + uid() + ".json"
-      ),
-      io.readFileSync(target, "utf8")
-    );
-  atomicWrite(io, target, JSON.stringify(state, null, 2));
+  const written = [];
+  try {
+    for (const attachment of prepared.attachments) {
+      const file = safeAttachmentPath(attachmentDir, attachment.fileName);
+      atomicWrite(io, file, attachment.bytes);
+      written.push(file);
+    }
+    if (io.existsSync(target))
+      atomicWrite(
+        io,
+        path.join(
+          safety,
+          filename + "-" + Date.now() + "-startup-restore-" + uid() + ".json"
+        ),
+        io.readFileSync(target, "utf8")
+      );
+    atomicWrite(io, target, JSON.stringify(prepared.state, null, 2));
+  } catch (error) {
+    for (const file of written) {
+      try {
+        io.unlinkSync(file);
+      } catch (cleanupError) {
+        /* best effort for unreferenced staged files */
+      }
+    }
+    throw error;
+  }
 }
 
 module.exports = { TaskRepository, normalize, restoreDataFile };

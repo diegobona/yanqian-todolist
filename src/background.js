@@ -52,6 +52,16 @@ else {
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
+
+function shortcutLabel(accelerator) {
+  return accelerator
+    .replace(
+      "CommandOrControl",
+      process.platform === "darwin" ? "Command" : "Ctrl"
+    )
+    .split("+")
+    .join(" + ");
+}
 function saveBounds() {
   if (!win || win.isDestroyed() || win.isMinimized()) return;
   try {
@@ -127,8 +137,8 @@ async function afterHide() {
     const shortcut = controller.getAccelerator();
     const detail = `点击系统托盘里的眼前图标，或再次启动眼前，即可恢复窗口。${
       shortcut
-        ? `\n快捷键：${shortcut}`
-        : "\n快捷键未注册，请在设置中选择其他组合。"
+        ? `\n快捷键：${shortcutLabel(shortcut)}`
+        : "\n当前快捷键不可用，可通过系统托盘或再次启动眼前找回窗口。"
     }`;
     try {
       if (!isTest)
@@ -338,7 +348,7 @@ async function init() {
   if (!shortcut.ok)
     send(
       "app:notice",
-      "快捷键注册失败，请在设置中更换组合。仍可通过任务栏、托盘或再次启动恢复窗口。"
+      "快捷键不可用，仍可通过任务栏、托盘或再次启动恢复窗口。"
     );
   if (!isDevelopment && !isTest && app.isPackaged)
     autoUpdater.checkForUpdatesAndNotify().catch(() => {});

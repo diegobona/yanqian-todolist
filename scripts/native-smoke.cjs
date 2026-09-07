@@ -3,11 +3,15 @@
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
-const { app, dialog } = require("electron");
+const { app, dialog, clipboard, nativeImage } = require("electron");
 app.disableHardwareAcceleration();
 const directory = path.resolve(process.argv[2]);
 const phase = process.argv[3];
 const reportFile = path.join(directory, "native-results.jsonl");
+const png1x1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
 const record = (name, detail) =>
   fs.appendFileSync(reportFile, JSON.stringify({ phase, name, detail }) + "\n");
 process.env.YANQIAN_TEST = "1";
@@ -16,7 +20,7 @@ app.setAppPath(path.resolve("dist_electron/bundled"));
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function waitFor(check, label, timeout = 2000) {
   const started = Date.now();
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() - started >= timeout)
       throw Error(`Timed out waiting for ${label}`);
     await pause(25);
@@ -102,6 +106,20 @@ app.on("browser-window-created", (event, win) => {
         assert.equal(persisted.todoList.length, 1);
         assert.equal(persisted.doneList.length, 1);
         assert.equal(persisted.trashList.length, 0);
+        const owner = [
+          ...persisted.todoList.map(task => ({ list: "todoList", task })),
+          ...persisted.doneList.map(task => ({ list: "doneList", task }))
+        ].find(entry => entry.task.screenshots.length === 1);
+        assert(owner, "one persisted task must own the native clipboard screenshot");
+        const screenshot = owner.task.screenshots[0];
+        const read = await action("readScreenshot", {
+          list: owner.list,
+          taskId: owner.task.id,
+          screenshotId: screenshot.id
+        });
+        const decoded = nativeImage.createFromDataURL(read);
+        assert(!decoded.isEmpty());
+        assert.deepStrictEqual(decoded.getSize(), { width: 1, height: 1 });
         await route("#/done");
         assert(
           (await evaluate(() => document.body.innerText)).includes(
@@ -154,6 +172,36 @@ app.on("browser-window-created", (event, win) => {
           state.todoList.map(item => item.id),
           order
         );
+        const firstVisibleContent = await evaluate(() =>
+          document.querySelector(".list .item p").textContent.trim()
+        );
+        const pasteTarget = state.todoList.find(item =>
+          firstVisibleContent.includes(item.content)
+        );
+        assert(pasteTarget, "visible first todo must map to a stable task ID");
+        const clipboardImage = nativeImage.createFromBuffer(png1x1);
+        assert(!clipboardImage.isEmpty());
+        clipboard.writeImage(clipboardImage);
+        state = await action("pasteScreenshot", {
+          list: "todoList",
+          taskId: pasteTarget.id
+        });
+        assert.equal(
+          state.todoList.find(item => item.id === pasteTarget.id).screenshots.length,
+          1
+        );
+        await route("#/settings");
+        await route("#/");
+        assert(
+          (await evaluate(() => document.body.innerText)).includes("1 张截图")
+        );
+        await click(".screenshot-summary");
+        await waitFor(
+          async () =>
+            await evaluate(() => !!document.querySelector(".screenshot-thumb img")),
+          "screenshot thumbnail"
+        );
+        record("native-clipboard-screenshot-fold-and-read", "passed");
         await complete();
         state = await snapshot();
         assert.equal(state.doneList.length, 1);
@@ -193,6 +241,7 @@ app.on("browser-window-created", (event, win) => {
         await action("export");
         const exported = JSON.parse(fs.readFileSync(json, "utf8"));
         assert.equal(exported.doneList.length, 1);
+        assert.equal(Object.keys(exported.attachmentData).length, 1);
         dialog.showSaveDialog = async () => ({
           canceled: false,
           filePath: xlsx

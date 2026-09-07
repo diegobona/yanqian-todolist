@@ -5,26 +5,39 @@
     <div class="list" v-for="group in groups" :key="group.date">
       <div class="group">{{ dateLabel(group.date) }}</div>
       <div class="item" v-for="done in group.items" :key="done.id">
-        <p
-          :class="{ concealed: done.hidden }"
-          :title="done.hidden ? '事项已隐藏' : done.content"
-        >
-          {{ done.hidden ? "••••••" : done.content }}
-        </p>
-        <i
-          :class="[
-            'iconfont',
-            'visibility-toggle',
-            done.hidden ? 'icon-browse' : 'icon-eye-close'
-          ]"
-          :title="done.hidden ? '显示此事项' : '隐藏此事项'"
-          :aria-label="done.hidden ? '显示此事项' : '隐藏此事项'"
-          @click="toggleVisibility(done)"
-        ></i>
-        <button title="恢复为待办" @click="act('restoreDone', done.id)">
-          恢复
-        </button>
-        <button title="移到回收站" @click="act('delete', done.id)">删除</button>
+        <div class="item-main">
+          <p
+            :class="{ concealed: done.hidden }"
+            :title="done.hidden ? '事项已隐藏' : done.content"
+          >
+            {{ done.hidden ? "••••••" : done.content }}
+          </p>
+          <i
+            :class="[
+              'iconfont',
+              'visibility-toggle',
+              done.hidden ? 'icon-browse' : 'icon-eye-close'
+            ]"
+            :title="done.hidden ? '显示此事项' : '隐藏此事项'"
+            :aria-label="done.hidden ? '显示此事项' : '隐藏此事项'"
+            @click="toggleVisibility(done)"
+          ></i>
+          <button title="恢复为待办" @click="act('restoreDone', done.id)">
+            恢复
+          </button>
+          <button title="移到回收站" @click="act('delete', done.id)">
+            删除
+          </button>
+        </div>
+        <TaskScreenshots
+          v-if="!done.hidden && done.screenshots && done.screenshots.length"
+          :task="done"
+          list="doneList"
+          :expanded="expandedId === done.id"
+          @toggle="toggleScreenshots"
+          @delete="deleteScreenshot(done.id, $event)"
+          @error="error = $event"
+        />
       </div>
     </div>
   </div>
@@ -32,10 +45,12 @@
 <script>
 import taskClient from "@/utils/taskClient";
 import { getDateStr } from "@/utils/common";
+import TaskScreenshots from "@/components/TaskScreenshots.vue";
 export default {
   name: "Done",
+  components: { TaskScreenshots },
   data() {
-    return { groups: [], error: "" };
+    return { groups: [], error: "", expandedId: "" };
   },
   methods: {
     dateLabel(value) {
@@ -55,6 +70,15 @@ export default {
           date,
           items
         })).sort((a, b) => b.date.localeCompare(a.date));
+        if (
+          this.expandedId &&
+          !this.groups.some(group =>
+            group.items.some(
+              item => item.id === this.expandedId && !item.hidden
+            )
+          )
+        )
+          this.expandedId = "";
         this.error = "";
       } catch (error) {
         this.error = error.message;
@@ -67,6 +91,7 @@ export default {
           id: item.id,
           hidden: !item.hidden
         });
+        if (!item.hidden && this.expandedId === item.id) this.expandedId = "";
         this.reload();
         taskClient.changed();
       } catch (error) {
@@ -76,8 +101,25 @@ export default {
     act(action, id) {
       try {
         taskClient.command(action, { id, list: "doneList" });
+        if (this.expandedId === id) this.expandedId = "";
         this.reload();
         taskClient.changed();
+      } catch (error) {
+        this.error = error.message;
+      }
+    },
+    toggleScreenshots(id) {
+      this.expandedId = this.expandedId === id ? "" : id;
+    },
+    async deleteScreenshot(taskId, screenshotId) {
+      try {
+        const value = await taskClient.attachment("deleteScreenshot", {
+          list: "doneList",
+          taskId,
+          screenshotId
+        });
+        if (value.canceled) return;
+        this.reload();
       } catch (error) {
         this.error = error.message;
       }
@@ -104,12 +146,16 @@ export default {
   color: #bfc9d2;
 }
 .item {
+  display: block;
+  min-height: 28px;
+}
+.item-main {
   display: flex;
   align-items: center;
   min-height: 28px;
   gap: 4px;
 }
-.item p {
+.item-main p {
   flex: 1;
   min-width: 0;
   overflow: hidden;

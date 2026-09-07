@@ -3,6 +3,7 @@
     <p v-if="error" class="error" role="alert" @click.stop>
       {{ error }} <button @click.stop="edited">重试保存</button>
     </p>
+    <p v-if="notice" class="notice" role="status" @click.stop>{{ notice }}</p>
     <draggable
       class="list"
       v-model="todoList"
@@ -14,57 +15,88 @@
     >
       <div
         class="item"
+        :class="{ selected: selectedId === todo.id }"
         v-for="(todo, index) in todoList"
         :key="todo.id"
         @click.stop="queueEdit($event, todo.id)"
       >
-        <input
-          class="todo-checkbox"
-          type="checkbox"
-          :aria-label="
-            todo.hidden
-              ? '完成隐藏事项'
-              : `完成事项：${todo.content || '空白草稿'}`
-          "
-          @click.stop
-          @change.stop="done($event, todo.id)"
-        />
-        <p v-if="todo.id !== editId" :class="{ concealed: todo.hidden }">
-          {{ index + 1 }}.{{
-            todo.hidden ? "••••••" : todo.content || "空白草稿（点击继续编辑）"
-          }}
-        </p>
-        <div class="edit" v-else>
+        <div class="item-main">
           <input
-            ref="editor"
-            v-model="draft"
-            v-focus
-            @input="persistInput"
-            @compositionend="persistInput"
+            class="todo-checkbox"
+            type="checkbox"
+            :aria-label="
+              todo.hidden
+                ? '完成隐藏事项'
+                : `完成事项：${todo.content || '空白草稿'}`
+            "
             @click.stop
-            @dblclick.stop
-            @keydown.esc="cancel($event)"
-            @keydown.enter="edited($event)"
-            spellcheck="false"
-            aria-label="编辑事项"
+            @change.stop="done($event, todo.id)"
           />
-          <i class="iconfont icon-select" title="保存" @click.stop="edited"></i>
+          <p v-if="todo.id !== editId" :class="{ concealed: todo.hidden }">
+            {{ index + 1 }}.{{
+              todo.hidden
+                ? "••••••"
+                : todo.content || "空白草稿（点击继续编辑）"
+            }}
+          </p>
+          <div class="edit" v-else>
+            <input
+              ref="editor"
+              v-model="draft"
+              v-focus
+              @input="persistInput"
+              @compositionend="persistInput"
+              @click.stop
+              @dblclick.stop
+              @keydown.esc="cancel($event)"
+              @keydown.enter="edited($event)"
+              spellcheck="false"
+              aria-label="编辑事项"
+            />
+            <i
+              class="iconfont icon-select"
+              title="保存"
+              @click.stop="edited"
+            ></i>
+            <i
+              class="iconfont icon-close"
+              title="移到回收站"
+              @click.stop="clear(todo.id)"
+            ></i>
+          </div>
+          <button
+            v-if="!todo.hidden"
+            class="screenshot-paste"
+            type="button"
+            title="粘贴剪贴板截图"
+            aria-label="粘贴剪贴板截图"
+            :disabled="screenshotBusy"
+            @click.stop="attachScreenshot(todo.id)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 5h16v14H4zM7 15l3-3 2 2 2-2 3 3M8 9h.01" />
+            </svg>
+          </button>
           <i
-            class="iconfont icon-close"
-            title="移到回收站"
-            @click.stop="clear(todo.id)"
+            :class="[
+              'iconfont',
+              'visibility-toggle',
+              todo.hidden ? 'icon-browse' : 'icon-eye-close'
+            ]"
+            :title="todo.hidden ? '显示此事项' : '隐藏此事项'"
+            :aria-label="todo.hidden ? '显示此事项' : '隐藏此事项'"
+            @click.stop="toggleVisibility(todo)"
           ></i>
         </div>
-        <i
-          :class="[
-            'iconfont',
-            'visibility-toggle',
-            todo.hidden ? 'icon-browse' : 'icon-eye-close'
-          ]"
-          :title="todo.hidden ? '显示此事项' : '隐藏此事项'"
-          :aria-label="todo.hidden ? '显示此事项' : '隐藏此事项'"
-          @click.stop="toggleVisibility(todo)"
-        ></i>
+        <TaskScreenshots
+          v-if="!todo.hidden && todo.screenshots && todo.screenshots.length"
+          :task="todo"
+          list="todoList"
+          :expanded="expandedId === todo.id"
+          @toggle="toggleScreenshots"
+          @delete="deleteScreenshot(todo.id, $event)"
+          @error="setNotice"
+        />
       </div>
     </draggable>
     <p v-if="!todoList.length && !error" class="empty">
@@ -75,18 +107,24 @@
 <script>
 import draggable from "vuedraggable";
 import taskClient from "@/utils/taskClient";
+import TaskScreenshots from "@/components/TaskScreenshots.vue";
 
 export default {
   name: "Todo",
-  components: { draggable },
+  components: { draggable, TaskScreenshots },
   data() {
     return {
       todoList: [],
       editId: "",
+      selectedId: "",
       draft: "",
       original: null,
       drag: false,
-      error: ""
+      error: "",
+      notice: "",
+      expandedId: "",
+      screenshotBusy: false,
+      pasteQueue: Promise.resolve()
     };
   },
   methods: {
@@ -94,6 +132,8 @@ export default {
       if (this.editId) return;
       try {
         this.todoList = taskClient.snapshot().todoList;
+        if (!this.todoList.some(item => item.id === this.selectedId))
+          this.selectedId = "";
         this.error = "";
       } catch (error) {
         this.error = error.message;
@@ -110,6 +150,14 @@ export default {
         return null;
       }
     },
+    setNotice(message) {
+      clearTimeout(this.noticeTimer);
+      this.notice = message || "";
+      if (this.notice)
+        this.noticeTimer = setTimeout(() => {
+          this.notice = "";
+        }, 2600);
+    },
     add() {
       if (this.editId) {
         this.edited();
@@ -119,6 +167,7 @@ export default {
       if (!state) return;
       const item = state.todoList[state.todoList.length - 1];
       this.editId = item.id;
+      this.selectedId = item.id;
       this.draft = "";
       this.original = null;
     },
@@ -127,6 +176,7 @@ export default {
       const item = this.todoList.find(todo => todo.id === id);
       if (!item || item.hidden || this.drag || (event && event.detail > 1))
         return;
+      this.selectedId = id;
       this.clickTimer = setTimeout(() => this.editing(id), 500);
     },
     dragStarted() {
@@ -140,6 +190,7 @@ export default {
       if (!item) return;
       this.original = { ...item };
       this.editId = id;
+      this.selectedId = id;
       this.draft = item.content;
     },
     persistInput(event) {
@@ -188,6 +239,8 @@ export default {
     },
     clear(id) {
       if (!this.apply("delete", { id, list: "todoList" })) return;
+      if (this.expandedId === id) this.expandedId = "";
+      if (this.selectedId === id) this.selectedId = "";
       this.editId = "";
       this.original = null;
       this.draft = "";
@@ -197,7 +250,11 @@ export default {
       clearTimeout(this.clickTimer);
       if (!this.edited()) return;
       if (!this.todoList.some(t => t.id === id)) return;
-      if (this.apply("complete", { id })) taskClient.changed();
+      if (this.apply("complete", { id })) {
+        if (this.expandedId === id) this.expandedId = "";
+        if (this.selectedId === id) this.selectedId = "";
+        taskClient.changed();
+      }
     },
     toggleVisibility(todo) {
       clearTimeout(this.clickTimer);
@@ -208,8 +265,79 @@ export default {
           id: todo.id,
           hidden: !todo.hidden
         })
-      )
+      ) {
+        if (!todo.hidden && this.expandedId === todo.id) this.expandedId = "";
+        if (!todo.hidden && this.selectedId === todo.id) this.selectedId = "";
         taskClient.changed();
+      }
+    },
+    toggleScreenshots(id) {
+      this.expandedId = this.expandedId === id ? "" : id;
+    },
+    attachScreenshot(taskId) {
+      clearTimeout(this.clickTimer);
+      const target = this.todoList.find(todo => todo.id === taskId);
+      if (!target || target.hidden) {
+        this.setNotice("请先显示要添加截图的事项");
+        return Promise.resolve(false);
+      }
+      this.selectedId = taskId;
+      if (this.editId === taskId) {
+        if (!this.persistInput()) return Promise.resolve(false);
+      } else if (this.editId && !this.edited()) return Promise.resolve(false);
+      const run = this.pasteQueue.then(async () => {
+        const current = taskClient
+          .snapshot()
+          .todoList.find(todo => todo.id === taskId);
+        if (!current) throw Error("事项已变化，请重新选择后粘贴");
+        if (current.hidden) throw Error("请先显示要添加截图的事项");
+        this.screenshotBusy = true;
+        await taskClient.attachment("pasteScreenshot", {
+          list: "todoList",
+          taskId
+        });
+        this.todoList = taskClient.snapshot().todoList;
+        this.expandedId = taskId;
+        this.setNotice("截图已添加");
+        return true;
+      });
+      this.pasteQueue = run.catch(() => false);
+      return run
+        .catch(error => {
+          this.setNotice(error.message);
+          return false;
+        })
+        .finally(() => {
+          this.screenshotBusy = false;
+        });
+    },
+    async deleteScreenshot(taskId, screenshotId) {
+      try {
+        const value = await taskClient.attachment("deleteScreenshot", {
+          list: "todoList",
+          taskId,
+          screenshotId
+        });
+        if (value.canceled) return;
+        this.todoList = taskClient.snapshot().todoList;
+        const task = this.todoList.find(item => item.id === taskId);
+        if (!task || !task.screenshots.length) this.expandedId = "";
+      } catch (error) {
+        this.setNotice(error.message);
+      }
+    },
+    onPaste(event) {
+      const items = Array.from(
+        (event.clipboardData && event.clipboardData.items) || []
+      );
+      if (!items.some(item => /^image\//.test(item.type || ""))) return;
+      event.preventDefault();
+      const taskId = this.editId || this.selectedId;
+      if (!taskId) {
+        this.setNotice("先点一下要添加截图的事项");
+        return;
+      }
+      this.attachScreenshot(taskId);
     },
     sorted() {
       this.drag = false;
@@ -227,14 +355,17 @@ export default {
     this.reload();
     this.unregisterFlush = taskClient.registerFlush(() => this.edited());
     window.addEventListener("tasks:changed", this.reload);
+    window.addEventListener("paste", this.onPaste);
   },
   beforeRouteLeave(to, from, next) {
     next(this.edited() ? undefined : false);
   },
   beforeDestroy() {
     clearTimeout(this.clickTimer);
+    clearTimeout(this.noticeTimer);
     if (this.unregisterFlush) this.unregisterFlush();
     window.removeEventListener("tasks:changed", this.reload);
+    window.removeEventListener("paste", this.onPaste);
   },
   directives: {
     focus: {
@@ -253,9 +384,17 @@ export default {
   padding: 0 15px 28px;
 }
 .item {
+  display: block;
+  min-height: 28px;
+}
+.item-main {
   display: flex;
   align-items: center;
   min-height: 28px;
+}
+.item.selected > .item-main {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
 }
 .todo-checkbox {
   flex: 0 0 auto;
@@ -264,7 +403,7 @@ export default {
   margin: 0 8px 0 0;
   cursor: pointer;
 }
-.item p {
+.item-main p {
   flex: 1;
   min-width: 0;
   line-height: 28px;
@@ -282,6 +421,36 @@ export default {
   flex: 0 0 auto;
   padding: 0 3px;
   cursor: pointer;
+}
+.screenshot-paste {
+  flex: 0 0 auto;
+  width: 23px;
+  height: 23px;
+  margin: 0 1px;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.item:hover .screenshot-paste,
+.screenshot-paste:focus {
+  opacity: 0.82;
+}
+.screenshot-paste:disabled {
+  cursor: wait;
+  opacity: 0.35;
+}
+.screenshot-paste svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .edit {
   display: flex;
@@ -312,6 +481,12 @@ export default {
 }
 .error {
   color: #ffcfb8;
+  font-size: 12px;
+  white-space: normal;
+}
+.notice {
+  margin: 0 0 3px;
+  color: #d9f3e5;
   font-size: 12px;
   white-space: normal;
 }

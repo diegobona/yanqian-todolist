@@ -30,6 +30,14 @@ const taskClient = {
     window.dispatchEvent(new Event("tasks:changed"));
     return result.value;
   },
+  async attachment(action, payload) {
+    const result = await ipcRenderer.invoke("app:action", { action, payload });
+    if (!result || !result.ok)
+      throw Error((result && result.error) || "截图操作失败");
+    if (action !== "readScreenshot" && !result.value.canceled)
+      window.dispatchEvent(new Event("tasks:changed"));
+    return result.value;
+  },
   changed() {
     window.dispatchEvent(new Event("tasks:changed"));
   }

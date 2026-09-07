@@ -12,10 +12,11 @@ const project = path.resolve(__dirname, '..');
 const nativeRequire = createRequire(path.join(project, 'package.json'));
 const plain = value => JSON.parse(JSON.stringify(value));
 const settle = () => new Promise(resolve => setImmediate(resolve));
+const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 // Execute production main-process modules in an isolated module cache. Only
 // Electron and process/clock boundaries are replaced; repository I/O is real.
-async function launch(t, { savedBounds, shortcutConflict = false } = {}) {
+async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null } = {}) {
   const tempRoot = path.resolve(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'yanqian-background-test-'));
   const clock = new Map();
@@ -110,7 +111,20 @@ async function launch(t, { savedBounds, shortcutConflict = false } = {}) {
       showMessageBox: async () => ({ response: 1 })
     },
     shell: { openPath: async () => '' },
-    Notification: { isSupported: () => false }
+    Notification: { isSupported: () => false },
+    clipboard: {
+      readImage: () => ({
+        isEmpty: () => !clipboardPng,
+        getSize: () => clipboardPng ? { width: 1, height: 1 } : { width: 0, height: 0 },
+        toPNG: () => clipboardPng || Buffer.alloc(0)
+      })
+    },
+    nativeImage: {
+      createFromBuffer: bytes => ({
+        isEmpty: () => !Buffer.isBuffer(bytes) || !bytes.equals(png1x1),
+        getSize: () => ({ width: 1, height: 1 })
+      })
+    }
   };
   const processBoundary = new EventEmitter();
   Object.assign(processBoundary, {
@@ -189,6 +203,30 @@ async function launch(t, { savedBounds, shortcutConflict = false } = {}) {
     }
   };
 }
+
+test('clipboard screenshots can be attached, lazily read and deleted with ownership checks', async t => {
+  const f = await launch(t, { clipboardPng: png1x1 });
+  const id = f.command('add', { content: 'attach here' }).todoList[0].id;
+  const pasted = await f.invoke('app:action', { action: 'pasteScreenshot', payload: { list: 'todoList', taskId: id } });
+  assert.equal(pasted.ok, true, pasted.error);
+  const shot = pasted.value.todoList[0].screenshots[0];
+  const read = await f.invoke('app:action', { action: 'readScreenshot', payload: { list: 'todoList', taskId: id, screenshotId: shot.id } });
+  assert.equal(read.ok, true, read.error);assert.equal(read.value, `data:image/png;base64,${png1x1.toString('base64')}`);
+  const wrongOwner = await f.invoke('app:action', { action: 'readScreenshot', payload: { list: 'todoList', taskId: 'missing', screenshotId: shot.id } });
+  assert.equal(wrongOwner.ok, false);
+  const removed = await f.invoke('app:action', { action: 'deleteScreenshot', payload: { list: 'todoList', taskId: id, screenshotId: shot.id } });
+  assert.equal(removed.ok, true);assert.equal(removed.value.todoList[0].screenshots.length, 0);
+});
+
+test('empty clipboard and hidden task reject screenshot attachment', async t => {
+  const f = await launch(t);
+  const id = f.command('add', { content: 'private' }).todoList[0].id;
+  let result = await f.invoke('app:action', { action: 'pasteScreenshot', payload: { list: 'todoList', taskId: id } });
+  assert.equal(result.ok, false);assert.match(result.error, /剪贴板里没有截图/);
+  f.command('setVisibility', { list: 'todoList', id, hidden: true });
+  result = await f.invoke('app:action', { action: 'pasteScreenshot', payload: { list: 'todoList', taskId: id } });
+  assert.equal(result.ok, false);assert.match(result.error, /隐藏/);
+});
 
 test('second instance recovers the actual main window without resetting saved valid coordinates', async t => {
   const savedBounds = { x: -1450, y: 110, width: 550, height: 750 };
@@ -325,7 +363,7 @@ test('move events debounce an atomic window-state.json write with width and heig
 test('shortcut registration conflict reports the failure while tray recovery remains functional', async t => {
   const f = await launch(t, { shortcutConflict: true });
   assert.equal(f.shortcuts.size, 0);
-  assert.ok(f.sent.some(message => message.channel === 'app:notice' && message.payload.includes('快捷键注册失败')));
+  assert.ok(f.sent.some(message => message.channel === 'app:notice' && message.payload.includes('快捷键不可用')));
   f.win.visible = false;
   f.trays[0].emit('click');
   assert.equal(f.win.visible, true);

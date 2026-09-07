@@ -2,7 +2,7 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 function component(filename, overrides={}){
  const source=fs.readFileSync(path.join(__dirname,'../src/views',filename),'utf8');
  const script=source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .*;\r?$/gm,'').replace('export default','module.exports =');
- const sandbox={module:{exports:{}},draggable:{},taskClient:overrides.client||{},getDateStr:s=>s,window:{addEventListener(){},removeEventListener(){}},setTimeout,clearTimeout};
+ const sandbox={module:{exports:{}},draggable:{},TaskScreenshots:{},taskClient:overrides.client||{},getDateStr:s=>s,window:{addEventListener(){},removeEventListener(){}},setTimeout,clearTimeout,Promise};
  vm.runInNewContext(script,sandbox);const c=sandbox.module.exports;const o={...c.data(),$set:(a,k,v)=>a[k]=v,$nextTick:fn=>fn(),$emit(){}};
  for(const [k,v] of Object.entries(c.methods||{}))o[k]=v.bind(o);
  return {c,o,source};
@@ -42,6 +42,7 @@ test('header eye controls all task visibility instead of hiding the window',()=>
 });
 test('settings presents simple data choices without backup internals',()=>{
  const settings=fs.readFileSync(path.join(__dirname,'../src/views/Settings.vue'),'utf8');
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
  const background=fs.readFileSync(path.join(__dirname,'../src/utils/backgroundExtra.js'),'utf8');
  assert.ok(settings.includes('<h2>设置</h2>'));
  assert.ok(settings.includes('事项自动保存在这台电脑上'));
@@ -54,6 +55,9 @@ test('settings presents simple data choices without backup internals',()=>{
  assert.ok(!background.includes('备份与设置'));
  assert.ok(background.includes('title: "导出数据"'));
  assert.ok(background.includes('title: "导入数据"'));
+ for(const copy of ['显示／隐藏快捷键','CommandOrControl+Shift+Space',"run('shortcut')"])
+  assert.ok(!settings.includes(copy),`settings should hide ${copy}`);
+ assert.ok(!app.includes('备份、回收站与快捷键'));
 });
 test('Done heading leaves room for completed tasks at minimum window height',()=>{
  const {source}=component('Done.vue');

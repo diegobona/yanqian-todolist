@@ -2,13 +2,22 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 const {JSDOM}=require('jsdom');const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'http://localhost/'});
 for(const key of ['window','document','Element','HTMLElement','HTMLBodyElement','Node','Event','navigator'])Object.defineProperty(global,key,{value:dom.window[key],configurable:true,writable:true});
 const Vue=require('vue');Vue.config.productionTip=false;Vue.config.devtools=false;const {mount}=require('@vue/test-utils');const compiler=require('vue-template-compiler');const babel=require('@babel/core');const {TaskRepository}=require('../src/services/taskRepository');
+const png1x1=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
+function vueComponent(file,client){
+ const source=compiler.parseComponent(fs.readFileSync(file,'utf8'));
+ const code=babel.transformSync(source.script.content,{babelrc:false,configFile:false,plugins:['@babel/plugin-transform-modules-commonjs']}).code;
+ const box={module:{exports:{}},exports:{},window,document,setTimeout,clearTimeout,require:id=>{
+  if(id==='@/utils/taskClient')return{default:client,__esModule:true};
+  if(id==='@/utils/common')return{getDateStr:x=>x};
+  if(id==='@/components/TaskScreenshots.vue')return{default:vueComponent(path.join(__dirname,'../src/components/TaskScreenshots.vue'),client),__esModule:true};
+  return require(id);
+ }};box.exports=box.module.exports;vm.runInNewContext(code,box);
+ const options=box.module.exports.default;Object.assign(options,compiler.compileToFunctions(source.template.content));return options;
+}
 function setup(t,name='Todo.vue'){
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'yanqian-ui-'));const repo=new TaskRepository({directory});let fail=false;const flushers=new Set();
- const client={snapshot:()=>repo.snapshot(),command:(action,payload)=>{if(fail)throw Error('disk denied');return repo.command(action,payload);},changed:()=>window.dispatchEvent(new Event('tasks:changed')),registerFlush:fn=>{flushers.add(fn);return()=>flushers.delete(fn);},flush:()=>Array.from(flushers).every(fn=>fn()!==false)};
- const source=compiler.parseComponent(fs.readFileSync(path.join(__dirname,'../src/views',name),'utf8'));
- const code=babel.transformSync(source.script.content,{babelrc:false,configFile:false,plugins:['@babel/plugin-transform-modules-commonjs']}).code;
- const box={module:{exports:{}},exports:{},window,setTimeout,clearTimeout,require:id=>id==='@/utils/taskClient'?{default:client,__esModule:true}:id==='@/utils/common'?{getDateStr:x=>x}:require(id)};box.exports=box.module.exports;vm.runInNewContext(code,box);
- const options=box.module.exports.default;Object.assign(options,compiler.compileToFunctions(source.template.content));
+ const client={snapshot:()=>repo.snapshot(),command:(action,payload)=>{if(fail)throw Error('disk denied');return repo.command(action,payload);},changed:()=>window.dispatchEvent(new Event('tasks:changed')),registerFlush:fn=>{flushers.add(fn);return()=>flushers.delete(fn);},flush:()=>Array.from(flushers).every(fn=>fn()!==false),attachment:async(action,payload)=>{if(fail)throw Error('disk denied');if(action==='pasteScreenshot')return repo.addScreenshot({...payload,png:png1x1});if(action==='readScreenshot')return`data:image/png;base64,${repo.readScreenshot(payload).toString('base64')}`;if(action==='deleteScreenshot')return repo.removeScreenshot(payload);throw Error('unsupported');}};
+ const options=vueComponent(path.join(__dirname,'../src/views',name),client);
  const wrapper=mount(options,{attachTo:document.body});
  t.after(()=>{wrapper.destroy();fs.rmSync(directory,{recursive:true,force:true});});
  return {wrapper,repo,client,directory,setFailure:v=>fail=v,options};
@@ -59,4 +68,34 @@ test('each completed item eye conceals and reveals its content',async t=>{
  const eye=wrapper.find('.visibility-toggle');assert.ok(eye.exists(),'each completed item needs a visibility control');
  await eye.trigger('click');await Vue.nextTick();assert.equal(repo.snapshot().doneList[0].hidden,true);assert.ok(!wrapper.html().includes('secret completed'));assert.match(wrapper.text(),/••••••/);
  await wrapper.find('.visibility-toggle').trigger('click');await Vue.nextTick();assert.equal(repo.snapshot().doneList[0].hidden,false);assert.match(wrapper.text(),/secret completed/);
+});
+
+test('todo screenshots start folded, expand one task at a time, preview and delete',async t=>{
+ const {wrapper,repo}=setup(t);const a=repo.command('add',{content:'A'}).todoList[0].id;const b=repo.command('add',{content:'B'}).todoList[1].id;
+ repo.addScreenshot({list:'todoList',taskId:a,png:png1x1});repo.addScreenshot({list:'todoList',taskId:b,png:png1x1});wrapper.vm.reload();await Vue.nextTick();
+ assert.equal(wrapper.findAll('.screenshot-summary').length,2);assert.equal(wrapper.find('.screenshot-gallery').exists(),false);
+ await wrapper.findAll('.screenshot-summary').at(0).trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
+ assert.equal(wrapper.vm.expandedId,a);assert.equal(wrapper.findAll('.screenshot-gallery').length,1);assert.equal(wrapper.find('.screenshot-thumb img').exists(),true);
+ await wrapper.find('.screenshot-thumb').trigger('click');await Vue.nextTick();assert.equal(wrapper.find('.screenshot-preview').exists(),true);
+ await wrapper.findAll('.screenshot-summary').at(1).trigger('click');await Vue.nextTick();assert.equal(wrapper.vm.expandedId,b);assert.equal(wrapper.find('.screenshot-preview').exists(),false);
+ await new Promise(resolve=>setImmediate(resolve));await wrapper.find('.screenshot-delete').trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
+ assert.equal(repo.snapshot().todoList.find(item=>item.id===b).screenshots.length,0);
+});
+
+test('image paste targets the selected todo while text paste remains native',async t=>{
+ const {wrapper,repo}=setup(t);const id=repo.command('add',{content:'paste target'}).todoList[0].id;wrapper.vm.reload();await Vue.nextTick();
+ let prevented=false;wrapper.vm.onPaste({clipboardData:{items:[{type:'text/plain'}]},preventDefault(){prevented=true;}});assert.equal(prevented,false);
+ wrapper.vm.onPaste({clipboardData:{items:[{type:'image/png'}]},preventDefault(){prevented=true;}});assert.equal(prevented,true);assert.match(wrapper.vm.notice,/先点一下/);
+ wrapper.vm.editing(id);await Vue.nextTick();prevented=false;wrapper.vm.onPaste({clipboardData:{items:[{type:'image/png'}]},preventDefault(){prevented=true;}});
+ await wrapper.vm.pasteQueue;await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();assert.equal(prevented,true);assert.equal(repo.snapshot().todoList[0].screenshots.length,1);assert.equal(wrapper.vm.expandedId,id);
+});
+
+test('hidden tasks expose neither screenshot controls nor image content',async t=>{
+ const {wrapper,repo}=setup(t);const id=repo.command('add',{content:'private image'}).todoList[0].id;repo.addScreenshot({list:'todoList',taskId:id,png:png1x1});repo.command('setVisibility',{list:'todoList',id,hidden:true});wrapper.vm.reload();await Vue.nextTick();
+ assert.equal(wrapper.find('.screenshot-paste').exists(),false);assert.equal(wrapper.find('.task-screenshots').exists(),false);assert.ok(!wrapper.html().includes(png1x1.toString('base64')));
+});
+
+test('completed tasks keep screenshots folded and can reveal them',async t=>{
+ const {wrapper,repo}=setup(t,'Done.vue');const id=repo.command('add',{content:'done image'}).todoList[0].id;repo.addScreenshot({list:'todoList',taskId:id,png:png1x1});repo.command('complete',{id});wrapper.vm.reload();await Vue.nextTick();
+ assert.match(wrapper.text(),/1 张截图/);assert.equal(wrapper.find('.screenshot-gallery').exists(),false);await wrapper.find('.screenshot-summary').trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();assert.equal(wrapper.find('.screenshot-thumb img').exists(),true);
 });

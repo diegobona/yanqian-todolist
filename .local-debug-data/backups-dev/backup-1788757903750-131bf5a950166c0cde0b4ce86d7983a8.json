@@ -5,19 +5,23 @@
       "content": "数量的劳动力",
       "todo_date": "2026/09/06",
       "todo_datetime": "2026/09/06 15:49:03",
-      "updated_at": "2026/09/06 20:54:58",
-      "hidden": false
-    },
-    {
-      "id": "fc5d69325e922869762e9d88e7e33f23",
-      "content": "顶顶顶顶",
-      "todo_date": "2026/09/06",
-      "todo_datetime": "2026/09/06 20:54:46",
-      "updated_at": "2026/09/06 20:54:48",
-      "hidden": false
+      "updated_at": "2026/09/06 22:46:42",
+      "hidden": false,
+      "screenshots": []
     }
   ],
   "doneList": [
+    {
+      "id": "fc5d69325e922869762e9d88e7e33f23",
+      "content": "顶顶顶顶苏格兰斯大林格勒收到了发给 受到法国历史的规律是的立方根零零零点六公里十多个律师代理费公司的跟律师代理公司领导给律师代理费公司领导",
+      "todo_date": "2026/09/06",
+      "todo_datetime": "2026/09/06 20:54:46",
+      "updated_at": "2026/09/06 22:33:24",
+      "hidden": false,
+      "done_date": "2026/09/06",
+      "done_datetime": "2026/09/06 22:33:24",
+      "screenshots": []
+    },
     {
       "id": "f4f3f2774b8269a1aaf537c3e6f2f087",
       "content": "顶顶顶",
@@ -26,7 +30,8 @@
       "updated_at": "2026/09/06 21:02:40",
       "hidden": false,
       "done_date": "2026/09/06",
-      "done_datetime": "2026/09/06 21:02:40"
+      "done_datetime": "2026/09/06 21:02:40",
+      "screenshots": []
     },
     {
       "id": "51d005985663f06620043f797c0e0dec",
@@ -36,7 +41,8 @@
       "updated_at": "2026/09/06 15:49:19",
       "done_date": "2026/09/06",
       "done_datetime": "2026/09/06 15:49:19",
-      "hidden": false
+      "hidden": false,
+      "screenshots": []
     }
   ],
   "settings": {
@@ -44,6 +50,9 @@
   },
   "trashList": [],
   "schemaVersion": 1,
-  "revision": 102,
-  "lastCompletion": null
+  "revision": 237,
+  "lastCompletion": {
+    "id": "fc5d69325e922869762e9d88e7e33f23",
+    "index": 1
+  }
 }
