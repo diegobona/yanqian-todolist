@@ -3,6 +3,7 @@
 module.exports = {
   pluginOptions: {
     electronBuilder: {
+      mainProcessWatch: ["src/services/**/*.js", "src/utils/db.js", "src/utils/backgroundExtra.js"],
       builderOptions: {
         ...(process.env.YANQIAN_ELECTRON_DIST
           ? { electronDist: process.env.YANQIAN_ELECTRON_DIST }

@@ -9,6 +9,7 @@
       v-model="todoList"
       :disabled="editId !== ''"
       :animation="200"
+      :move="allowTaskMove"
       ghost-class="ghost"
       @start="dragStarted"
       @end="sorted"
@@ -83,6 +84,27 @@
               <path d="M4 5h16v14H4zM7 15l3-3 2 2 2-2 3 3M8 9h.01" />
             </svg>
           </button>
+          <button
+            class="pin-toggle"
+            :class="{ pinned: todo.pinned }"
+            type="button"
+            :title="todo.pinned ? '取消置顶' : '置顶事项'"
+            :aria-label="todo.pinned ? '取消置顶' : '置顶事项'"
+            :aria-pressed="String(!!todo.pinned)"
+            @click.stop="togglePinned(todo)"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 3h8l-1 7 4 4v2H5v-2l4-4-1-7Z M12 16v5" />
+            </svg>
+          </button>
           <i
             :class="[
               'iconfont',
@@ -138,6 +160,16 @@ export default {
     };
   },
   methods: {
+    togglePinned(todo) {
+      if (!this.edited()) return;
+      if (this.apply("setPinned", { id: todo.id, pinned: !todo.pinned }))
+        taskClient.changed();
+    },
+    allowTaskMove(event) {
+      const from = event.draggedContext.element;
+      const to = event.relatedContext.element;
+      return !to || !!from.pinned === !!to.pinned;
+    },
     previewText(content) {
       const chars = Array.from(content || "");
       return chars.length > 100 ? chars.slice(0, 100).join("") + "…" : content;
@@ -152,7 +184,9 @@ export default {
     },
     setTodoList(state) {
       const tabId = this.currentTabId(state);
-      this.todoList = state.todoList.filter(todo => todo.tabId === tabId);
+      this.todoList = state.todoList
+        .filter(todo => todo.tabId === tabId)
+        .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
     },
     reload() {
       if (this.editId) return;
@@ -470,9 +504,10 @@ export default {
 }
 .todo-checkbox {
   flex: 0 0 auto;
+  align-self: flex-start;
   width: 15px;
   height: 15px;
-  margin: 0 8px 0 0;
+  margin: 6px 8px 0 0;
   cursor: pointer;
 }
 .item-main p {
@@ -492,6 +527,32 @@ export default {
   flex: 0 0 auto;
   padding: 0 3px;
   cursor: pointer;
+}
+.pin-toggle {
+  flex: 0 0 auto;
+  width: 23px;
+  height: 23px;
+  margin: 0 1px;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0;
+}
+.pin-toggle svg {
+  width: 17px;
+  height: 17px;
+}
+.item:hover .pin-toggle,
+.pin-toggle:focus-visible {
+  opacity: 0.8;
+}
+.pin-toggle.pinned {
+  opacity: 1;
+  color: #e6c77d;
+}
+.pin-toggle.pinned svg {
+  fill: rgba(230, 199, 125, 0.2);
 }
 .screenshot-paste {
   flex: 0 0 auto;

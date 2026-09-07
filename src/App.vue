@@ -113,7 +113,8 @@
         ></i>
         <i
           :class="['iconfont', ignoreMouse ? 'icon-lock' : 'icon-unlock']"
-          title="切换鼠标穿透"
+          :title="ignoreMouse ? '解锁窗口' : '锁定窗口'"
+          :aria-label="ignoreMouse ? '解锁窗口' : '锁定窗口'"
           @mouseenter="setIgnoreMouseEvents(false)"
           @mouseleave="setIgnoreMouseEvents(ignoreMouse)"
           @click="toggleIgnore"

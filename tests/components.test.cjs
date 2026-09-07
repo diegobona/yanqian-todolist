@@ -125,6 +125,13 @@ test('Ctrl+S saves multiline text and the editor hint disappears',async t=>{
  const editor=wrapper.find('textarea');await editor.setValue('一\n二');await editor.trigger('keydown',{key:'s',keyCode:83,ctrlKey:true});
  assert.equal(wrapper.vm.editId,'');assert.equal(wrapper.find('.editor-hint').exists(),false);assert.equal(repo.snapshot().todoList[0].content,'一\n二');
 });
+
+test('pinning moves a task to the top without opening editor and can be cancelled',async t=>{
+ const {wrapper,repo}=setup(t);repo.command('add',{content:'ordinary'});repo.command('add',{content:'important'});wrapper.vm.reload();await Vue.nextTick();
+ await wrapper.findAll('.pin-toggle').at(1).trigger('click');assert.equal(wrapper.vm.editId,'');assert.equal(wrapper.vm.todoList[0].content,'important');assert.equal(wrapper.find('.pin-toggle').attributes('aria-pressed'),'true');
+ assert.equal(wrapper.vm.allowTaskMove({draggedContext:{element:{pinned:true}},relatedContext:{element:{pinned:false}}}),false);
+ await wrapper.find('.pin-toggle').trigger('click');assert.ok(repo.snapshot().todoList.every(item=>!item.pinned));
+});
 test('long tasks show 100 characters with a full hover title and remain intact in editing',async t=>{
  const {wrapper,repo}=setup(t);const full='文'.repeat(100)+'😀末尾';repo.command('add',{content:full});wrapper.vm.reload();await Vue.nextTick();
  const text=wrapper.find('.item-main p');assert.equal(text.text(),'1.'+'文'.repeat(100)+'…');assert.equal(text.attributes('title'),full);

@@ -76,6 +76,9 @@ function normalize(raw) {
     if (item.hidden !== undefined && typeof item.hidden !== "boolean")
       throw Error("事项显示状态无效");
     item.hidden = item.hidden === true;
+    if (item.pinned !== undefined && typeof item.pinned !== "boolean")
+      throw Error("事项置顶状态无效");
+    item.pinned = item.pinned === true;
     if (item.screenshots !== undefined && !Array.isArray(item.screenshots))
       throw Error("事项截图格式无效");
     item.screenshots = (item.screenshots || []).map(screenshot => {
@@ -409,6 +412,7 @@ class TaskRepository {
           todo_datetime: now,
           updated_at: now,
           hidden: false,
+          pinned: false,
           screenshots: [],
           tabId: tab.id,
           tabName: tab.name
@@ -462,6 +466,12 @@ class TaskRepository {
         const item = next.todoList[locate("todoList", payload.id)];
         item.content = content(payload.content);
         item.updated_at = stamp();
+        break;
+      }
+      case "setPinned": {
+        if (typeof payload.pinned !== "boolean")
+          throw Error("事项置顶状态无效");
+        next.todoList[locate("todoList", payload.id)].pinned = payload.pinned;
         break;
       }
       case "setVisibility": {

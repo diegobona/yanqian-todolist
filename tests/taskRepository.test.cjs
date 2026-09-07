@@ -197,3 +197,7 @@ test('completed tasks remember their source tab and restore it after tab deletio
   const {repo}=fixture(t);const tab=repo.command('addTab',{name:'客户'}).tabs.find(item=>item.name==='客户');const id=repo.command('add',{content:'报价',tabId:tab.id}).todoList.find(item=>item.tabId===tab.id).id;
   repo.command('complete',{id});repo.command('deleteTab',{id:tab.id});const state=repo.command('restoreDone',{id});assert.ok(state.tabs.some(item=>item.id===tab.id&&item.name==='客户'));assert.ok(state.todoList.some(item=>item.id===id&&item.tabId===tab.id));
 });
+
+test('pin state survives restart and completion preserves the task',t=>{
+ const {repo,reopen}=fixture(t);const id=add(repo,'important');repo.command('setPinned',{id,pinned:true});assert.equal(reopen().snapshot().todoList[0].pinned,true);repo.command('complete',{id});assert.equal(repo.snapshot().doneList[0].id,id);assert.equal(repo.snapshot().doneList[0].pinned,true);
+});
