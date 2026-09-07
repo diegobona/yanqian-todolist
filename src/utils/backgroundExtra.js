@@ -10,6 +10,7 @@ import {
   nativeImage
 } from "electron";
 import DB from "./db";
+import { relocateData } from "@/services/dataLocation";
 import path from "path";
 import pkg from "../../package.json";
 import ExcelJS from "exceljs";
@@ -60,6 +61,28 @@ export function initExtra({ getWindow, controller, requestFlush }) {
       const parent = getWindow();
       let value;
       switch (request.action) {
+        case "changeDirectory": {
+          const selected = await dialog.showOpenDialog(parent, {
+            title: "选择保存位置（将在其中创建 yanqian-todo-list 文件夹）",
+            properties: ["openDirectory", "createDirectory"]
+          });
+          if (selected.canceled || !selected.filePaths.length)
+            return { ok: true, value: { canceled: true } };
+          if (!(await requestFlush()))
+            throw Error("有内容尚未保存，请先重试保存");
+          relocateData(
+            repository,
+            selected.filePaths[0],
+            path.join(
+              app.getPath("userData"),
+              process.env.NODE_ENV !== "production"
+                ? "data-location-dev.json"
+                : "data-location.json"
+            )
+          );
+          value = "保存位置已更改，事项和截图已迁移";
+          break;
+        }
         case "deleteTab": {
           const state = repository.snapshot();
           const tab = state.tabs.find(item => item.id === request.payload.id);

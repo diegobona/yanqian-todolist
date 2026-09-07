@@ -22,7 +22,7 @@ import {
 } from "@/services/windowController";
 import pkg from "../package.json";
 import { dockEdge, handleBounds, contains } from "@/services/edgeDock";
-import { prepareDataLocation } from "@/services/dataLocation";
+import { prepareDataLocation, readDataLocation } from "@/services/dataLocation";
 const isDevelopment = process.env.NODE_ENV !== "production";
 const isTest = process.env.YANQIAN_TEST === "1";
 if (isTest && process.env.YANQIAN_DATA_DIR)
@@ -34,6 +34,7 @@ let readyToQuit = false,
   flushId = 0;
 let boundsWarningShown = false;
 let modalOpen = false;
+let windowLocked = false;
 ipcMain.on("window:modal", (event, open) => {
   if (win && !win.isDestroyed() && event.sender === win.webContents)
     modalOpen = open === true;
@@ -53,8 +54,19 @@ function expandDock() {
   lastWindowMove = Date.now();
   outsideSince = 0;
 }
+function applyWindowLocked(locked = windowLocked) {
+  windowLocked = locked === true;
+  if (!win || win.isDestroyed()) return windowLocked;
+  if (windowLocked) expandDock();
+  win.setIgnoreMouseEvents(false);
+  win.setAlwaysOnTop(windowLocked);
+  win.setMovable(!windowLocked);
+  win.setResizable(!windowLocked);
+  send("window:locked", windowLocked);
+  return windowLocked;
+}
 async function checkDock() {
-  if (modalOpen) {
+  if (modalOpen || windowLocked) {
     outsideSince = 0;
     return;
   }
@@ -100,14 +112,13 @@ async function checkDock() {
       win.isMinimized() ||
       quitting ||
       modalOpen ||
+      windowLocked ||
       contains(win.getBounds(), screen.getCursorScreenPoint()) ||
       Date.now() - lastWindowMove < 120
     )
       return;
     saveBounds();
     expandedBounds = { ...bounds };
-    win.setIgnoreMouseEvents(false);
-    send("window:unlocked");
     send("window:docked", dock.edge);
     win.setMinimumSize(1, 1);
     win.setBounds(handleBounds(bounds, dock));
@@ -259,7 +270,14 @@ async function afterHide() {
 }
 
 async function openRepository() {
-  const directory = app.getPath("userData");
+  const defaultDirectory = app.getPath("userData");
+  const directory = readDataLocation(
+    path.join(
+      defaultDirectory,
+      isDevelopment ? "data-location-dev.json" : "data-location.json"
+    ),
+    defaultDirectory
+  );
   for (;;) {
     try {
       return DB.initDB(directory);
@@ -311,6 +329,7 @@ async function openRepository() {
 async function init() {
   repository = await openRepository();
   if (!repository) return;
+  windowLocked = repository.snapshot().settings.windowLocked;
   createAppMenu();
   let saved = {};
   try {
@@ -338,6 +357,9 @@ async function init() {
     show: false,
     minimizable: true,
     maximizable: false,
+    alwaysOnTop: windowLocked,
+    movable: !windowLocked,
+    resizable: !windowLocked,
     skipTaskbar: false,
     title: pkg.name,
     webPreferences: { nodeIntegration: true, contextIsolation: false }
@@ -350,7 +372,7 @@ async function init() {
     writeSettings: patch => repository.command("settings", patch),
     onShow: () => {
       expandDock();
-      send("window:unlocked");
+      applyWindowLocked();
       saveBounds();
     },
     onHide: () => {
@@ -382,9 +404,12 @@ async function init() {
       return false;
     return quitSafely();
   });
-  ipcMain.handle("setIgnoreMouseEvents", (event, ignore) => {
-    if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
-    win.setIgnoreMouseEvents(!!ignore, { forward: true });
+  ipcMain.handle("setWindowLocked", (event, locked) => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents)
+      return false;
+    if (typeof locked !== "boolean") throw Error("窗口锁定状态无效");
+    repository.command("setWindowLocked", { locked });
+    return applyWindowLocked(locked);
   });
   win.on("move", () => {
     lastWindowMove = Date.now();
@@ -405,12 +430,11 @@ async function init() {
   win.on("closed", () => {
     win = null;
   });
-  // A taskbar restore after Show Desktop must also release click-through and the UI mask.
+  // Restore the persisted window behavior after Show Desktop or taskbar minimize.
   win.on("restore", () => {
     if (win && !win.isDestroyed()) {
-      win.setIgnoreMouseEvents(false);
       win.setEnabled(true);
-      send("window:unlocked");
+      applyWindowLocked();
     }
   });
   win.webContents.on("render-process-gone", () => {
@@ -438,6 +462,7 @@ async function init() {
     });
   backupTimer = setInterval(() => {
     try {
+      repository.pruneTrash();
       repository.backup();
     } catch (error) {
       send("app:notice", `自动备份失败：${error.message}`);

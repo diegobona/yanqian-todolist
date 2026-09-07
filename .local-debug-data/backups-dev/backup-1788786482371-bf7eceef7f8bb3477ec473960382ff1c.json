@@ -5,8 +5,12 @@
       "content": "数量的劳动力",
       "todo_date": "2026/09/06",
       "todo_datetime": "2026/09/06 15:49:03",
-      "updated_at": "2026/09/06 22:42:02",
-      "hidden": false
+      "updated_at": "2026/09/06 22:46:42",
+      "hidden": false,
+      "screenshots": [],
+      "pinned": false,
+      "tabId": "todo",
+      "tabName": "待办"
     }
   ],
   "doneList": [
@@ -18,7 +22,11 @@
       "updated_at": "2026/09/06 22:33:24",
       "hidden": false,
       "done_date": "2026/09/06",
-      "done_datetime": "2026/09/06 22:33:24"
+      "done_datetime": "2026/09/06 22:33:24",
+      "screenshots": [],
+      "pinned": false,
+      "tabId": "todo",
+      "tabName": "待办"
     },
     {
       "id": "f4f3f2774b8269a1aaf537c3e6f2f087",
@@ -28,7 +36,11 @@
       "updated_at": "2026/09/06 21:02:40",
       "hidden": false,
       "done_date": "2026/09/06",
-      "done_datetime": "2026/09/06 21:02:40"
+      "done_datetime": "2026/09/06 21:02:40",
+      "screenshots": [],
+      "pinned": false,
+      "tabId": "todo",
+      "tabName": "待办"
     },
     {
       "id": "51d005985663f06620043f797c0e0dec",
@@ -38,17 +50,29 @@
       "updated_at": "2026/09/06 15:49:19",
       "done_date": "2026/09/06",
       "done_datetime": "2026/09/06 15:49:19",
-      "hidden": false
+      "hidden": false,
+      "screenshots": [],
+      "pinned": false,
+      "tabId": "todo",
+      "tabName": "待办"
     }
   ],
   "settings": {
-    "hideHintSeen": true
+    "hideHintSeen": true,
+    "interfaceTransparency": 25,
+    "windowLocked": false
   },
   "trashList": [],
   "schemaVersion": 1,
-  "revision": 207,
+  "revision": 264,
   "lastCompletion": {
     "id": "fc5d69325e922869762e9d88e7e33f23",
     "index": 1
-  }
+  },
+  "tabs": [
+    {
+      "id": "todo",
+      "name": "待办"
+    }
+  ]
 }

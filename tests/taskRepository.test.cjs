@@ -20,6 +20,50 @@ function add(repo, content) {
   return state.todoList[state.todoList.length - 1].id;
 }
 
+test('interface transparency defaults to 30 and only accepts 0 through 70', t => {
+  const {repo, reopen} = fixture(t);
+  assert.equal(repo.snapshot().settings.interfaceTransparency, 30);
+  repo.command('setInterfaceTransparency', {value:55});
+  assert.equal(reopen().snapshot().settings.interfaceTransparency, 55);
+  assert.throws(()=>repo.command('setInterfaceTransparency', {value:-1}), /透明度/);
+  assert.throws(()=>repo.command('setInterfaceTransparency', {value:71}), /透明度/);
+  assert.throws(()=>repo.command('setInterfaceTransparency', {value:30.5}), /透明度/);
+});
+
+test('window lock defaults off, persists and requires a boolean', t => {
+  const {repo, reopen} = fixture(t);
+  assert.equal(repo.snapshot().settings.windowLocked, false);
+  repo.command('setWindowLocked', {locked:true});
+  assert.equal(reopen().snapshot().settings.windowLocked, true);
+  assert.throws(()=>repo.command('setWindowLocked', {locked:'yes'}), /锁定/);
+});
+
+test('trash supports permanent deletion and clearing without touching live tasks', t => {
+  const {repo, reopen} = fixture(t);
+  const a = add(repo, 'A'), b = add(repo, 'B'), c = add(repo, 'C');
+  repo.command('delete', {id:a, list:'todoList'});
+  repo.command('delete', {id:b, list:'todoList'});
+  repo.command('deleteTrash', {id:a});
+  assert.deepEqual(reopen().snapshot().trashList.map(e=>e.task.id), [b]);
+  assert.throws(()=>repo.command('restoreTrash', {id:a}));
+  repo.command('clearTrash');
+  assert.equal(reopen().snapshot().trashList.length, 0);
+  assert.equal(repo.snapshot().todoList[0].id, c);
+});
+
+test('trash expires at 30 days, retains recent and invalid dates, persists cleanup', t => {
+  const {repo,reopen} = fixture(t);
+  for (const content of ['expired','recent','unknown']) {
+    const id=add(repo,content); repo.command('delete',{id,list:'todoList'});
+  }
+  const now=Date.now();
+  repo.state.trashList.find(e=>e.task.content==='expired').deleted_at=new Date(now-30*86400000).toISOString();
+  repo.state.trashList.find(e=>e.task.content==='recent').deleted_at=new Date(now-30*86400000+60000).toISOString();
+  repo.state.trashList.find(e=>e.task.content==='unknown').deleted_at='invalid';
+  repo.pruneTrash(now);
+  assert.deepEqual(reopen().snapshot().trashList.map(e=>e.task.content), ['unknown','recent']);
+});
+
 test('migrates missing and duplicate IDs without losing records or custom fields', t => {
   const { repo, directory, reopen } = fixture(t, { todoList: [{content:'A', custom:'kept'}, {id:'same',content:'B'}], doneList:[{id:'same',content:'C'}], settings:{old:true} });
   const s = repo.snapshot();

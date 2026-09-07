@@ -6,7 +6,8 @@ const png1x1=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQV
 function vueComponent(file,client){
  const source=compiler.parseComponent(fs.readFileSync(file,'utf8'));
  const code=babel.transformSync(source.script.content,{babelrc:false,configFile:false,plugins:['@babel/plugin-transform-modules-commonjs']}).code;
- const box={module:{exports:{}},exports:{},window,document,setTimeout,clearTimeout,require:id=>{
+ const box={module:{exports:{}},exports:{},window,document,setTimeout,clearTimeout,setInterval,clearInterval,require:id=>{
+  if(id==='../../package.json')return require('../package.json');
   if(id==='@/utils/taskClient')return{default:client,__esModule:true};
   if(id==='@/utils/fireworks')return{fireworks:()=>()=>{}};
   if(id==='@/utils/common')return{getDateStr:x=>x};
@@ -17,7 +18,7 @@ function vueComponent(file,client){
 }
 function setup(t,name='Todo.vue'){
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'yanqian-ui-'));const repo=new TaskRepository({directory});let fail=false;const flushers=new Set();
- const client={setModal(){},snapshot:()=>repo.snapshot(),command:(action,payload)=>{if(fail)throw Error('disk denied');return repo.command(action,payload);},changed:()=>window.dispatchEvent(new Event('tasks:changed')),registerFlush:fn=>{flushers.add(fn);return()=>flushers.delete(fn);},flush:()=>Array.from(flushers).every(fn=>fn()!==false),attachment:async(action,payload)=>{if(fail)throw Error('disk denied');if(action==='pasteScreenshot')return repo.addScreenshot({...payload,png:png1x1});if(action==='readScreenshot')return`data:image/png;base64,${repo.readScreenshot(payload).toString('base64')}`;if(action==='deleteScreenshot')return repo.removeScreenshot(payload);throw Error('unsupported');}};
+ const client={setModal(){},snapshot:()=>repo.snapshot(),metadata:()=>({directory}),command:(action,payload)=>{if(fail)throw Error('disk denied');return repo.command(action,payload);},changed:()=>window.dispatchEvent(new Event('tasks:changed')),registerFlush:fn=>{flushers.add(fn);return()=>flushers.delete(fn);},flush:()=>Array.from(flushers).every(fn=>fn()!==false),attachment:async(action,payload)=>{if(fail)throw Error('disk denied');if(action==='pasteScreenshot')return repo.addScreenshot({...payload,png:png1x1});if(action==='readScreenshot')return`data:image/png;base64,${repo.readScreenshot(payload).toString('base64')}`;if(action==='deleteScreenshot')return repo.removeScreenshot(payload);throw Error('unsupported');}};
  const options=vueComponent(path.join(__dirname,'../src/views',name),client);
  const route={path:name==='Done.vue'?'/done':'/',query:{tab:'todo'}};const router={push(){},replace(){}};
  const wrapper=mount(options,{attachTo:document.body,mocks:{$route:route,$router:router}});
@@ -136,4 +137,38 @@ test('long tasks show 100 characters with a full hover title and remain intact i
  const {wrapper,repo}=setup(t);const full='文'.repeat(100)+'😀末尾';repo.command('add',{content:full});wrapper.vm.reload();await Vue.nextTick();
  const text=wrapper.find('.item-main p');assert.equal(text.text(),'1.'+'文'.repeat(100)+'…');assert.equal(text.attributes('title'),full);
  await wrapper.find('.item').trigger('click');assert.equal(wrapper.find('textarea').element.value,full);
+});
+
+test('settings trash confirmation cancels safely and deletes only after confirmation', async t => {
+ const {wrapper,repo,client}=setup(t,'Settings.vue');
+ client.metadata=()=>({directory:'C:/test'});
+ const id=repo.command('add',{content:'to delete'}).todoList[0].id;
+ repo.command('delete',{id,list:'todoList'});
+ wrapper.vm.reload(); await Vue.nextTick();
+ assert.match(wrapper.text(),/保留 30 天，到期自动清理/);
+ assert.doesNotMatch(wrapper.text(),/删除后保留/);
+ const findButton=text=>wrapper.findAll('button').wrappers.find(b=>b.text()===text);
+ await findButton('彻底删除').trigger('click');
+ assert.ok(wrapper.find('[role="alertdialog"]').exists());
+ await findButton('取消').trigger('click');
+ assert.equal(repo.snapshot().trashList.length,1);
+ await findButton('清空回收站').trigger('click');
+ assert.match(wrapper.find('[role="alertdialog"]').text(),/1 项/);
+ await findButton('确认清空').trigger('click');
+ assert.equal(repo.snapshot().trashList.length,0);
+ assert.match(wrapper.text(),/暂无删除的事项/);
+ assert.equal(findButton('清空回收站'),undefined);
+});
+
+test('settings shows concise retention copy and saves interface transparency live', async t => {
+ const {wrapper,repo,client}=setup(t,'Settings.vue');
+ client.metadata=()=>({directory:'C:/test'});
+ wrapper.vm.reload(); await Vue.nextTick();
+ assert.match(wrapper.text(),/保留 30 天，到期自动清理/);
+ assert.doesNotMatch(wrapper.text(),/删除后保留/);
+ const slider=wrapper.find('input[aria-label="界面透明度"]');
+ assert.equal(slider.attributes('min'),'0');assert.equal(slider.attributes('max'),'70');
+ slider.element.value='55';await slider.trigger('input');
+ assert.equal(repo.snapshot().settings.interfaceTransparency,55);
+ assert.match(wrapper.text(),/55%/);
 });

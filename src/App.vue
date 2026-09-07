@@ -1,7 +1,8 @@
 <template>
   <div
     id="app"
-    :class="[{ unfocused: ignoreMouse, docked: !!dockEdge }, dockEdge]"
+    :class="[{ locked: windowLocked, docked: !!dockEdge }, dockEdge]"
+    :style="interfaceStyle"
   >
     <div
       v-if="dockEdge"
@@ -11,7 +12,6 @@
     >
       <span></span>
     </div>
-    <div class="mask"></div>
     <div class="drag-nav" aria-hidden="true"></div>
     <div class="nav">
       <div class="link tabs-navigation">
@@ -112,12 +112,10 @@
           @click="toggleAllTasksVisibility"
         ></i>
         <i
-          :class="['iconfont', ignoreMouse ? 'icon-lock' : 'icon-unlock']"
-          :title="ignoreMouse ? '解锁窗口' : '锁定窗口'"
-          :aria-label="ignoreMouse ? '解锁窗口' : '锁定窗口'"
-          @mouseenter="setIgnoreMouseEvents(false)"
-          @mouseleave="setIgnoreMouseEvents(ignoreMouse)"
-          @click="toggleIgnore"
+          :class="['iconfont', windowLocked ? 'icon-lock' : 'icon-unlock']"
+          :title="windowLocked ? '解锁窗口' : '锁定窗口'"
+          :aria-label="windowLocked ? '解锁窗口' : '锁定窗口'"
+          @click="toggleWindowLock"
         ></i>
         <router-link
           to="/settings"
@@ -171,7 +169,7 @@ export default {
   components: { draggable },
   data() {
     return {
-      ignoreMouse: false,
+      windowLocked: false,
       dockEdge: "",
       notice: "",
       hasTasks: false,
@@ -182,7 +180,8 @@ export default {
       tabDraft: "",
       tabsOverflowing: false,
       canScrollLeft: false,
-      canScrollRight: false
+      canScrollRight: false,
+      interfaceTransparency: 30
     };
   },
   watch: {
@@ -196,6 +195,11 @@ export default {
     }
   },
   computed: {
+    interfaceStyle() {
+      if (this.dockEdge) return { backgroundColor: "transparent" };
+      const alpha = (100 - this.interfaceTransparency) / 100;
+      return { backgroundColor: `rgba(0, 0, 0, ${alpha})` };
+    },
     activeTabId() {
       if (this.$route.path !== "/") return "";
       const requested = this.$route.query.tab;
@@ -320,15 +324,16 @@ export default {
         this.notice = error.message;
       }
     },
-    setIgnoreMouseEvents(ignore) {
-      ipcRenderer.invoke("setIgnoreMouseEvents", ignore).catch(error => {
-        this.notice = error.message;
-      });
-    },
-    toggleIgnore() {
+    toggleWindowLock() {
       if (!taskClient.flush()) return;
-      this.ignoreMouse = !this.ignoreMouse;
-      this.setIgnoreMouseEvents(this.ignoreMouse);
+      ipcRenderer
+        .invoke("setWindowLocked", !this.windowLocked)
+        .then(locked => {
+          this.windowLocked = locked;
+        })
+        .catch(error => {
+          this.notice = error.message;
+        });
     },
     async exportData() {
       try {
@@ -344,6 +349,8 @@ export default {
         this.reloadTabs(snapshot);
         const tasks = [...snapshot.todoList, ...snapshot.doneList];
         this.hasTasks = tasks.length > 0;
+        this.interfaceTransparency = snapshot.settings.interfaceTransparency;
+        this.windowLocked = snapshot.settings.windowLocked;
         this.allTasksHidden =
           this.hasTasks && tasks.every(item => item.hidden === true);
       } catch (error) {
@@ -385,8 +392,8 @@ export default {
       this.dockEdge = edge;
     };
     ipcRenderer.on("window:docked", this.onDocked);
-    this.onUnlocked = () => {
-      this.ignoreMouse = false;
+    this.onWindowLocked = (event, locked) => {
+      this.windowLocked = locked === true;
     };
     this.onNotice = (event, text) => {
       this.notice = text;
@@ -400,7 +407,7 @@ export default {
     };
     this.onTasksChanged = () => this.reloadVisibility();
     this.reloadVisibility();
-    ipcRenderer.on("window:unlocked", this.onUnlocked);
+    ipcRenderer.on("window:locked", this.onWindowLocked);
     ipcRenderer.on("window:settings", this.onSettings);
     ipcRenderer.on("app:notice", this.onNotice);
     ipcRenderer.on("window:flush-request", this.onFlush);
@@ -414,7 +421,7 @@ export default {
   },
   beforeDestroy() {
     ipcRenderer.removeListener("window:docked", this.onDocked);
-    ipcRenderer.removeListener("window:unlocked", this.onUnlocked);
+    ipcRenderer.removeListener("window:locked", this.onWindowLocked);
     ipcRenderer.removeListener("window:settings", this.onSettings);
     ipcRenderer.removeListener("app:notice", this.onNotice);
     ipcRenderer.removeListener("window:flush-request", this.onFlush);
@@ -433,17 +440,13 @@ export default {
   background: rgba(0, 0, 0, 0.7);
   border-radius: 5px;
 }
-.mask {
-  display: none;
-  position: absolute;
-  z-index: 999;
-  width: 100%;
-  height: 100%;
-}
 .drag-nav {
   -webkit-app-region: drag;
   height: 16px;
   flex-shrink: 0;
+}
+.locked .drag-nav {
+  -webkit-app-region: no-drag;
 }
 .settings-link {
   display: inline-flex;
@@ -631,15 +634,6 @@ button {
   cursor: pointer;
   font-size: 11px;
   margin-left: 6px;
-}
-#app.unfocused {
-  opacity: 0.8;
-}
-#app.unfocused .mask {
-  display: block;
-}
-#app.unfocused .tools {
-  z-index: 1000;
 }
 #app.docked {
   background: transparent;

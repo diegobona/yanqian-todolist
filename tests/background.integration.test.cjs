@@ -16,7 +16,7 @@ const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE
 
 // Execute production main-process modules in an isolated module cache. Only
 // Electron and process/clock boundaries are replaced; repository I/O is real.
-async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null } = {}) {
+async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null, initialSettings } = {}) {
   const tempRoot = path.resolve(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'yanqian-background-test-'));
   const clock = new Map();
@@ -30,6 +30,7 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
   });
   const stateFile = path.join(directory, 'window-state.json');
   if (savedBounds) fs.writeFileSync(stateFile, JSON.stringify(savedBounds));
+  if (initialSettings) fs.writeFileSync(path.join(directory, 'data.json'), JSON.stringify({todoList:[],doneList:[],settings:initialSettings}));
 
   const sent = [];
   const calls = [];
@@ -73,6 +74,9 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
       this.destroyed = false;
       this.enabled = true;
       this.ignoring = false;
+      this.alwaysOnTop = false;
+      this.movable = true;
+      this.resizable = true;
       this.webContents = new EventEmitter();
       this.webContents.send = (channel, payload) => sent.push({ channel, payload });
       windows.push(this);
@@ -81,6 +85,9 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
     isVisible() { return this.visible; }
     isMinimized() { return this.minimized; }
     setIgnoreMouseEvents(value) { this.ignoring = value; calls.push(['ignore', value]); }
+    setAlwaysOnTop(value) { this.alwaysOnTop = value; calls.push(['alwaysOnTop', value]); }
+    setMovable(value) { this.movable = value; calls.push(['movable', value]); }
+    setResizable(value) { this.resizable = value; calls.push(['resizable', value]); }
     setEnabled(value) { this.enabled = value; calls.push(['enabled', value]); }
     getBounds() { return { ...this.bounds }; }
     setBounds(bounds) { this.bounds = plain(bounds); calls.push(['bounds', plain(bounds)]); }
@@ -218,6 +225,43 @@ test('clipboard screenshots can be attached, lazily read and deleted with owners
   assert.equal(removed.ok, true);assert.equal(removed.value.todoList[0].screenshots.length, 0);
 });
 
+test('renderer can save interface transparency through its dedicated command', async t => {
+  const f = await launch(t);
+  const state = f.command('setInterfaceTransparency', { value: 55 });
+  assert.equal(state.settings.interfaceTransparency, 55);
+  const saved = JSON.parse(fs.readFileSync(path.join(f.directory, 'data.json'), 'utf8'));
+  assert.equal(saved.settings.interfaceTransparency, 55);
+});
+
+test('window lock stays interactive, fixed and above other applications', async t => {
+  const f = await launch(t);
+  const locked = await f.invoke('setWindowLocked', true);
+  assert.equal(locked, true);
+  assert.equal(f.win.ignoring, false);
+  assert.equal(f.win.alwaysOnTop, true);
+  assert.equal(f.win.movable, false);
+  assert.equal(f.win.resizable, false);
+  const saved = JSON.parse(fs.readFileSync(path.join(f.directory, 'data.json'), 'utf8'));
+  assert.equal(saved.settings.windowLocked, true);
+
+  const unlocked = await f.invoke('setWindowLocked', false);
+  assert.equal(unlocked, false);
+  assert.equal(f.win.alwaysOnTop, false);
+  assert.equal(f.win.movable, true);
+  assert.equal(f.win.resizable, true);
+});
+
+test('saved window lock is restored at startup and blocks edge auto-hide', async t => {
+  const f = await launch(t, { initialSettings: { windowLocked: true } });
+  assert.equal(f.win.alwaysOnTop, true);
+  assert.equal(f.win.movable, false);
+  f.win.bounds = { x: -320, y: 100, width: 320, height: 290 };
+  f.tick(30);
+  await new Promise(resolve => setTimeout(resolve, 70));
+  f.tick(30);
+  assert.deepEqual(f.win.bounds, { x: -320, y: 100, width: 320, height: 290 });
+});
+
 test('empty clipboard and hidden task reject screenshot attachment', async t => {
   const f = await launch(t);
   const id = f.command('add', { content: 'private' }).todoList[0].id;
@@ -254,7 +298,7 @@ test('second instance recovers the actual main window without resetting saved va
   assert.deepEqual(f.win.getBounds(), savedBounds);
 });
 
-test('native restore event releases click-through and sends renderer unlock', async t => {
+test('native restore event stays interactive and synchronizes the saved lock state', async t => {
   const f = await launch(t);
   f.win.ignoring = true;
   f.win.enabled = false;
@@ -262,7 +306,7 @@ test('native restore event releases click-through and sends renderer unlock', as
   f.win.emit('restore');
   assert.equal(f.win.ignoring, false);
   assert.equal(f.win.enabled, true);
-  assert.ok(f.sent.some(message => message.channel === 'window:unlocked'));
+  assert.ok(f.sent.some(message => message.channel === 'window:locked' && message.payload === false));
 });
 
 test('window control handlers minimize and close through the safe quit flow', async t => {
@@ -373,5 +417,5 @@ test('shortcut registration conflict reports the failure while tray recovery rem
   f.win.visible = false;
   f.trays[0].emit('click');
   assert.equal(f.win.visible, true);
-  assert.ok(f.sent.some(message => message.channel === 'window:unlocked'));
+  assert.ok(f.sent.some(message => message.channel === 'window:locked' && message.payload === false));
 });

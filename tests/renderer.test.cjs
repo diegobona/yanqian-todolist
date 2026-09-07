@@ -65,10 +65,10 @@ test('Done heading leaves room for completed tasks at minimum window height',()=
  assert.ok(!/height:\s*224px/.test(group),'history header consumes almost entire viewport');
  assert.ok(!/z-index:\s*-999/.test(group),'history headings must not be hidden behind window');
 });
-test('hide, quit and route leave have a save guard and recover resets renderer lock',()=>{
+test('hide, quit and route leave have a save guard and recover synchronizes renderer lock',()=>{
  const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
  assert.ok(app.includes('window:flush-request'),'native hide/quit must flush pending text');
- assert.ok(app.includes('window:unlocked'),'recovered window must clear renderer mask');
+ assert.ok(app.includes('window:locked'),'recovered window must synchronize the persisted lock');
  const {c}=component('Todo.vue');assert.equal(typeof c.beforeRouteLeave,'function');
 });
 test('navigation uses editable todo tabs with one permanent completed tab',()=>{
@@ -85,4 +85,21 @@ test('tab navigation supports drag ordering separators and overflow arrows',()=>
 test('changing routes closes the tab action row',()=>{
  const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
  assert.match(app,/"\$route\.fullPath"\(\)\s*\{[\s\S]*?closeTabActions\(\)/);
+});
+test('the saved transparency changes only the interface background',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
+ assert.ok(app.includes(':style="interfaceStyle"'));
+ assert.match(app,/interfaceTransparency[\s\S]*?backgroundColor/);
+ assert.ok(app.includes('rgba(0, 0, 0,'));
+ const settings=fs.readFileSync(path.join(__dirname,'../src/views/Settings.vue'),'utf8');
+ assert.ok(settings.includes('setInterfaceTransparency'));
+ assert.ok(!settings.includes('只调整背景，文字和图标保持清晰'));
+});
+test('lock control uses real window locking without mouse passthrough',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
+ assert.ok(app.includes('setWindowLocked'));
+ assert.ok(app.includes('window:locked'));
+ assert.ok(app.includes('locked: windowLocked'));
+ assert.ok(!app.includes('setIgnoreMouseEvents'));
+ assert.ok(!app.includes('class="mask"'));
 });

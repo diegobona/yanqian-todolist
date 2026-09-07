@@ -154,6 +154,18 @@ function normalize(raw) {
     return entry;
   });
   state.settings = state.settings || {};
+  if (state.settings.interfaceTransparency === undefined)
+    state.settings.interfaceTransparency = 30;
+  if (
+    !Number.isInteger(state.settings.interfaceTransparency) ||
+    state.settings.interfaceTransparency < 0 ||
+    state.settings.interfaceTransparency > 70
+  )
+    throw Error("界面透明度设置无效");
+  if (state.settings.windowLocked === undefined)
+    state.settings.windowLocked = false;
+  if (typeof state.settings.windowLocked !== "boolean")
+    throw Error("窗口锁定设置无效");
   state.schemaVersion = 1;
   state.revision = Number.isSafeInteger(state.revision) ? state.revision : 0;
   state.lastCompletion = state.lastCompletion || null;
@@ -263,7 +275,24 @@ class TaskRepository {
     );
   }
   snapshot() {
+    this.pruneTrash();
     return clone(this.state);
+  }
+  pruneTrash(now = Date.now()) {
+    const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+    const kept = this.state.trashList.filter(entry => {
+      const deleted = Date.parse(entry.deleted_at);
+      // Unknown legacy dates must never cause accidental deletion.
+      return !Number.isFinite(deleted) || deleted > cutoff;
+    });
+    if (kept.length === this.state.trashList.length) return;
+    const next = {
+      ...this.state,
+      trashList: kept,
+      revision: this.state.revision + 1
+    };
+    this.atomicWrite(this.file, JSON.stringify(next, null, 2));
+    this.state = next;
   }
   task(list, taskId, state = this.state) {
     if (!["todoList", "doneList"].includes(list)) throw Error("列表无效");
@@ -578,6 +607,24 @@ class TaskRepository {
         next.todoList.splice(index, 1);
         break;
       }
+      case "deleteTrash": {
+        const index = next.trashList.findIndex(
+          entry => entry.task.id === payload.id
+        );
+        if (index < 0) throw Error("回收站记录已变化");
+        next.trashList.splice(index, 1);
+        break;
+      }
+      case "clearTrash": {
+        // Only remove entries the user saw when opening the confirmation.
+        if (payload.ids) {
+          if (!Array.isArray(payload.ids)) throw Error("回收站记录无效");
+          next.trashList = next.trashList.filter(
+            entry => !payload.ids.includes(entry.task.id)
+          );
+        } else next.trashList = [];
+        break;
+      }
       case "restoreTrash": {
         const index = next.trashList.findIndex(
           entry => entry.task.id === payload.id
@@ -593,9 +640,32 @@ class TaskRepository {
         destructive = true;
         break;
       }
+      case "setInterfaceTransparency": {
+        if (
+          !Number.isInteger(payload.value) ||
+          payload.value < 0 ||
+          payload.value > 70
+        )
+          throw Error("界面透明度设置无效");
+        next.settings.interfaceTransparency = payload.value;
+        break;
+      }
+      case "setWindowLocked": {
+        if (typeof payload.locked !== "boolean")
+          throw Error("窗口锁定状态无效");
+        next.settings.windowLocked = payload.locked;
+        break;
+      }
       case "settings": {
         if (!payload || typeof payload !== "object" || Array.isArray(payload))
           throw Error("设置无效");
+        if (
+          payload.interfaceTransparency !== undefined &&
+          (!Number.isInteger(payload.interfaceTransparency) ||
+            payload.interfaceTransparency < 0 ||
+            payload.interfaceTransparency > 70)
+        )
+          throw Error("界面透明度设置无效");
         next.settings = Object.assign({}, next.settings, payload);
         break;
       }
