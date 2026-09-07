@@ -8,6 +8,7 @@ function vueComponent(file,client){
  const code=babel.transformSync(source.script.content,{babelrc:false,configFile:false,plugins:['@babel/plugin-transform-modules-commonjs']}).code;
  const box={module:{exports:{}},exports:{},window,document,setTimeout,clearTimeout,require:id=>{
   if(id==='@/utils/taskClient')return{default:client,__esModule:true};
+  if(id==='@/utils/fireworks')return{fireworks:()=>()=>{}};
   if(id==='@/utils/common')return{getDateStr:x=>x};
   if(id==='@/components/TaskScreenshots.vue')return{default:vueComponent(path.join(__dirname,'../src/components/TaskScreenshots.vue'),client),__esModule:true};
   return require(id);
@@ -16,7 +17,7 @@ function vueComponent(file,client){
 }
 function setup(t,name='Todo.vue'){
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'yanqian-ui-'));const repo=new TaskRepository({directory});let fail=false;const flushers=new Set();
- const client={snapshot:()=>repo.snapshot(),command:(action,payload)=>{if(fail)throw Error('disk denied');return repo.command(action,payload);},changed:()=>window.dispatchEvent(new Event('tasks:changed')),registerFlush:fn=>{flushers.add(fn);return()=>flushers.delete(fn);},flush:()=>Array.from(flushers).every(fn=>fn()!==false),attachment:async(action,payload)=>{if(fail)throw Error('disk denied');if(action==='pasteScreenshot')return repo.addScreenshot({...payload,png:png1x1});if(action==='readScreenshot')return`data:image/png;base64,${repo.readScreenshot(payload).toString('base64')}`;if(action==='deleteScreenshot')return repo.removeScreenshot(payload);throw Error('unsupported');}};
+ const client={setModal(){},snapshot:()=>repo.snapshot(),command:(action,payload)=>{if(fail)throw Error('disk denied');return repo.command(action,payload);},changed:()=>window.dispatchEvent(new Event('tasks:changed')),registerFlush:fn=>{flushers.add(fn);return()=>flushers.delete(fn);},flush:()=>Array.from(flushers).every(fn=>fn()!==false),attachment:async(action,payload)=>{if(fail)throw Error('disk denied');if(action==='pasteScreenshot')return repo.addScreenshot({...payload,png:png1x1});if(action==='readScreenshot')return`data:image/png;base64,${repo.readScreenshot(payload).toString('base64')}`;if(action==='deleteScreenshot')return repo.removeScreenshot(payload);throw Error('unsupported');}};
  const options=vueComponent(path.join(__dirname,'../src/views',name),client);
  const route={path:name==='Done.vue'?'/done':'/',query:{tab:'todo'}};const router={push(){},replace(){}};
  const wrapper=mount(options,{attachTo:document.body,mocks:{$route:route,$router:router}});
@@ -79,7 +80,7 @@ test('todo screenshots start folded, expand one task at a time, preview and dele
  assert.equal(wrapper.vm.expandedId,a);assert.equal(wrapper.findAll('.screenshot-gallery').length,1);assert.equal(wrapper.find('.screenshot-thumb img').exists(),true);
  await wrapper.find('.screenshot-thumb').trigger('click');await Vue.nextTick();assert.equal(wrapper.find('.screenshot-preview').exists(),true);
  await wrapper.findAll('.screenshot-summary').at(1).trigger('click');await Vue.nextTick();assert.equal(wrapper.vm.expandedId,b);assert.equal(wrapper.find('.screenshot-preview').exists(),false);
- await new Promise(resolve=>setImmediate(resolve));await wrapper.find('.screenshot-delete').trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
+ await new Promise(resolve=>setImmediate(resolve));await wrapper.find('.screenshot-delete').trigger('click');assert.equal(repo.snapshot().todoList.find(item=>item.id===b).screenshots.length,1);await wrapper.find('.confirm-actions .danger').trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
  assert.equal(repo.snapshot().todoList.find(item=>item.id===b).screenshots.length,0);
 });
 

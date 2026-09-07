@@ -8,6 +8,9 @@ function request(action, payload) {
   return result.value;
 }
 const taskClient = {
+  setModal(open) {
+    ipcRenderer.send("window:modal", open);
+  },
   snapshot: () => request("snapshot"),
   command: (action, payload) => request("command", { action, payload }),
   metadata: () => request("metadata"),

@@ -117,17 +117,6 @@ export function initExtra({ getWindow, controller, requestFlush }) {
           break;
         }
         case "deleteScreenshot": {
-          const choice = await dialog.showMessageBox(parent, {
-            type: "warning",
-            title: "删除截图",
-            message: "删除这张截图？",
-            detail: "事项本身会保留。",
-            buttons: ["取消", "删除"],
-            defaultId: 0,
-            cancelId: 0
-          });
-          if (choice.response !== 1)
-            return { ok: true, value: { canceled: true } };
           value = repository.removeScreenshot(request.payload || {});
           break;
         }

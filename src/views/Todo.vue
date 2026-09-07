@@ -115,6 +115,7 @@
 </template>
 <script>
 import draggable from "vuedraggable";
+import { fireworks } from "@/utils/fireworks";
 import taskClient from "@/utils/taskClient";
 import TaskScreenshots from "@/components/TaskScreenshots.vue";
 
@@ -289,9 +290,18 @@ export default {
     },
     done(event, id) {
       clearTimeout(this.clickTimer);
+      const source =
+        event && event.target && event.target.closest(".item-main");
+
+      const bounds = source && source.getBoundingClientRect();
+
       if (!this.edited()) return;
       if (!this.todoList.some(t => t.id === id)) return;
       if (this.apply("complete", { id })) {
+        if (!this.shatterCleanups) this.shatterCleanups = new Set();
+        const cleanup = fireworks(bounds);
+        this.shatterCleanups.add(cleanup);
+        setTimeout(() => this.shatterCleanups.delete(cleanup), 1300);
         if (this.expandedId === id) this.expandedId = "";
         if (this.selectedId === id) this.selectedId = "";
         taskClient.changed();
@@ -419,6 +429,8 @@ export default {
     this.$nextTick(this.reload);
   },
   beforeDestroy() {
+    if (this.shatterCleanups)
+      this.shatterCleanups.forEach(cleanup => cleanup());
     clearTimeout(this.clickTimer);
     clearTimeout(this.noticeTimer);
     if (this.unregisterFlush) this.unregisterFlush();

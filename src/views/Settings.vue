@@ -1,34 +1,47 @@
 <template>
   <div class="settings">
-    <div class="product-identity">
-      <span class="product-name">眼前</span>
-      <span class="product-version">版本 {{ version }}</span>
-    </div>
-    <h2>设置</h2>
+    <header class="settings-header">
+      <h2>设置</h2>
+      <div class="product-identity">
+        <span class="product-name">眼前</span>
+        <span class="product-version">v{{ version }}</span>
+      </div>
+    </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" class="message" role="status">{{ message }}</p>
-    <h3>数据</h3>
-    <p class="hint">事项自动保存在这台电脑上。</p>
-    <p class="hint">保存位置</p>
-    <p class="data-directory">{{ directory }}</p>
-    <div class="actions">
-      <button :disabled="busy" @click="run('export')">导出数据</button>
-      <button :disabled="busy" @click="run('import')">导入数据</button>
-    </div>
-    <p class="hint">换电脑或重装前，可以先导出一份数据。</p>
-    <h3>回收站</h3>
-    <p class="hint">删除的事项会一直保留，恢复后回到原列表。</p>
-    <p v-if="!trash.length" class="hint">回收站为空</p>
-    <div v-for="entry in trash" :key="entry.task.id" class="trash row">
-      <span :title="entry.task.content"
-        >{{ entry.task.content || "空白草稿"
-        }}<small
-          >{{ entry.list === "doneList" ? "已完成" : entry.task.tabName }} ·
-          {{ entry.deleted_at }}</small
-        ></span
-      >
-      <button :disabled="busy" @click="restore(entry.task.id)">恢复</button>
-    </div>
+    <section class="settings-section" aria-label="本地数据">
+      <h3>本地数据</h3>
+      <p class="hint">事项自动保存在这台电脑上。</p>
+      <div class="location">
+        <span class="location-label">保存位置</span>
+        <p class="data-directory">{{ directory }}</p>
+      </div>
+      <div class="actions">
+        <button :disabled="busy" @click="run('export')">导出数据</button>
+        <button :disabled="busy" @click="run('import')">导入数据</button>
+      </div>
+      <p class="hint">换电脑或重装前，可以先导出一份数据。</p>
+    </section>
+    <section class="settings-section" aria-label="回收站">
+      <div class="section-heading">
+        <h3>回收站</h3>
+        <span class="count">{{ trash.length }} 项</span>
+      </div>
+      <p class="hint">已删除事项可恢复到原清单。</p>
+      <p v-if="!trash.length" class="empty-trash">暂无删除的事项</p>
+      <div v-for="entry in trash" :key="entry.task.id" class="trash row">
+        <span :title="entry.task.content"
+          ><span class="trash-content">{{
+            entry.task.content || "空白草稿"
+          }}</span
+          ><small
+            >{{ entry.list === "doneList" ? "已完成" : entry.task.tabName }} ·
+            {{ entry.deleted_at }}</small
+          ></span
+        >
+        <button :disabled="busy" @click="restore(entry.task.id)">恢复</button>
+      </div>
+    </section>
   </div>
 </template>
 <script>
@@ -90,23 +103,34 @@ export default {
 </script>
 <style lang="scss" scoped>
 .settings {
-  padding: 0 15px 20px;
+  padding: 8px 15px 20px;
   font-size: 12px;
+  max-width: 640px;
+  margin: 0 auto;
+  color: #e4ebe7;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+.settings-header,
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-header {
+  margin-bottom: 14px;
 }
 .product-identity {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 0 16px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  align-items: baseline;
+  gap: 7px;
 }
 .product-name {
   font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
     sans-serif;
-  font-size: 22px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
   color: #d5e8dc;
 }
 .product-version {
@@ -118,37 +142,80 @@ export default {
   user-select: text;
   color: #dce7e0;
   line-height: 1.6;
-  margin: 4px 0 10px;
+  margin: 5px 0 0;
+  font-size: 11px;
+}
+.settings-section {
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(210, 230, 219, 0.12);
+  border-radius: 10px;
+  background: rgba(17, 23, 20, 0.88);
+}
+.location {
+  padding: 10px 12px;
+  margin: 12px 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.location-label,
+.count {
+  font-size: 10px;
+  color: #a3afa8;
 }
 h2 {
-  font-size: 16px;
-  margin: 0 0 10px;
+  font-size: 18px;
+  margin: 0;
 }
 h3 {
-  font-size: 14px;
-  margin: 16px 0 6px;
+  font-size: 13px;
+  margin: 0 0 5px;
 }
 .row {
   display: flex;
   gap: 6px;
   align-items: center;
-  margin: 5px 0;
+  margin: 0;
+  padding: 11px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-.row span {
+.row > span {
   flex: 1;
   min-width: 0;
 }
 .row span {
   overflow-wrap: anywhere;
 }
+.trash-content {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.6;
+}
+.empty-trash {
+  text-align: center;
+  padding: 16px 0 8px;
+  color: #94a198;
+  font-size: 11px;
+}
 button {
-  background: #333;
-  border: 1px solid #888;
-  border-radius: 3px;
-  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce8e0;
+  border: 1px solid rgba(213, 232, 220, 0.2);
+  border-radius: 6px;
+  padding: 6px 11px;
   cursor: pointer;
   font-size: 12px;
   flex-shrink: 0;
+}
+button:hover:not(:disabled) {
+  background: rgba(186, 216, 199, 0.15);
+  border-color: #80998a;
+}
+button:focus-visible {
+  outline: 2px solid #bad8c7;
+  outline-offset: 2px;
 }
 button:disabled {
   opacity: 0.5;
@@ -157,11 +224,12 @@ button:disabled {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  margin-bottom: 9px;
 }
 .hint,
 small {
-  color: #bfc6cf;
+  color: #a8b4ac;
   font-size: 11px;
   line-height: 1.5;
   margin: 5px 0;

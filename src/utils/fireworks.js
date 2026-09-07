@@ -1,191 +1,109 @@
-class Circle {
-  constructor({ origin, speed, color, angle, context }) {
-    this.origin = origin;
-    this.position = { ...this.origin };
-    this.color = color;
-    this.speed = speed;
-    this.angle = angle;
-    this.context = context;
-    this.renderCount = 0;
-  }
-
-  draw() {
-    this.context.fillStyle = this.color;
-    this.context.beginPath();
-    this.context.arc(this.position.x, this.position.y, 2, 0, Math.PI * 2);
-    this.context.fill();
-  }
-
-  move() {
-    this.position.x = Math.sin(this.angle) * this.speed + this.position.x;
-    this.position.y =
-      Math.cos(this.angle) * this.speed +
-      this.position.y +
-      this.renderCount * 0.3;
-    this.renderCount++;
-  }
-}
-
-class Boom {
-  constructor({ origin, context, circleCount = 10, area }) {
-    this.origin = origin;
-    this.context = context;
-    this.circleCount = circleCount;
-    this.area = area;
-    this.stop = false;
-    this.circles = [];
-  }
-
-  randomArray(range) {
-    const length = range.length;
-    const randomIndex = Math.floor(length * Math.random());
-    return range[randomIndex];
-  }
-
-  randomColor() {
-    const range = ["8", "9", "A", "B", "C", "D", "E", "F"];
-    return (
-      "#" +
-      this.randomArray(range) +
-      this.randomArray(range) +
-      this.randomArray(range) +
-      this.randomArray(range) +
-      this.randomArray(range) +
-      this.randomArray(range)
-    );
-  }
-
-  randomRange(start, end) {
-    return (end - start) * Math.random() + start;
-  }
-
-  init() {
-    for (let i = 0; i < this.circleCount; i++) {
-      const circle = new Circle({
-        context: this.context,
-        origin: this.origin,
-        color: this.randomColor(),
-        angle: this.randomRange(Math.PI - 1, Math.PI + 1),
-        speed: this.randomRange(1, 6)
-      });
-      this.circles.push(circle);
+export function fireworks(bounds) {
+  if (
+    !bounds ||
+    !bounds.width ||
+    !bounds.height ||
+    (window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+  )
+    return () => {};
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return () => {};
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  canvas.setAttribute("aria-hidden", "true");
+  Object.assign(canvas.style, {
+    position: "fixed",
+    inset: "0",
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+    zIndex: "1500"
+  });
+  context.scale(scale, scale);
+  document.body.appendChild(canvas);
+  const originX = bounds.left + Math.min(bounds.width * 0.4, 150);
+  const originY = bounds.top + bounds.height / 2;
+  const colors = [
+    "#ffe09a",
+    "#ffb65c",
+    "#ff728b",
+    "#a78bfa",
+    "#68e5d0",
+    "#f9fff0"
+  ];
+  const sparks = Array.from({ length: 100 }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / 100 + Math.random() * 0.12;
+    const speed = 65 + Math.random() * 210;
+    return {
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      color: colors[index % colors.length],
+      size: 0.8 + Math.random() * 1.7,
+      life: 0.65 + Math.random() * 0.55,
+      twinkle: Math.random() * 6
+    };
+  });
+  let frame,
+    stopped = false;
+  const cleanup = () => {
+    stopped = true;
+    window.cancelAnimationFrame(frame);
+    canvas.remove();
+  };
+  const start = window.performance.now();
+  function draw(now) {
+    if (stopped) return;
+    const time = (now - start) / 1000;
+    context.clearRect(0, 0, width, height);
+    context.globalCompositeOperation = "lighter";
+    if (time < 0.2) {
+      const glow = context.createRadialGradient(
+        originX,
+        originY,
+        0,
+        originX,
+        originY,
+        36
+      );
+      glow.addColorStop(0, `rgba(255,250,220,${1 - time / 0.2})`);
+      glow.addColorStop(1, "rgba(255,180,80,0)");
+      context.fillStyle = glow;
+      context.fillRect(originX - 36, originY - 36, 72, 72);
     }
-  }
-
-  move() {
-    this.circles.forEach((circle, index) => {
-      if (
-        circle.position.x > this.area.width ||
-        circle.position.y > this.area.height
-      ) {
-        return this.circles.splice(index, 1);
-      }
-      circle.move();
-    });
-    if (this.circles.length == 0) {
-      this.stop = true;
+    for (const spark of sparks) {
+      if (time > spark.life) continue;
+      const travel = (1 - Math.exp(-2.5 * time)) / 2.5;
+      const previous = Math.max(0, time - 0.035);
+      const tail = (1 - Math.exp(-2.5 * previous)) / 2.5;
+      const x = originX + spark.vx * travel;
+      const y = originY + spark.vy * travel + 65 * time * time;
+      context.globalAlpha =
+        Math.pow(1 - time / spark.life, 0.65) *
+        (0.75 + 0.25 * Math.sin(time * 35 + spark.twinkle));
+      context.strokeStyle = spark.color;
+      context.lineWidth = spark.size;
+      context.lineCap = "round";
+      context.beginPath();
+      context.moveTo(
+        originX + spark.vx * tail,
+        originY + spark.vy * tail + 65 * previous * previous
+      );
+      context.lineTo(x, y);
+      context.stroke();
+      context.fillStyle = spark.color;
+      context.beginPath();
+      context.arc(x, y, spark.size, 0, Math.PI * 2);
+      context.fill();
     }
+    context.globalAlpha = 1;
+    if (time < 1.25) frame = window.requestAnimationFrame(draw);
+    else cleanup();
   }
-
-  draw() {
-    this.circles.forEach(circle => circle.draw());
-  }
+  frame = window.requestAnimationFrame(draw);
+  return cleanup;
 }
-
-class CursorSpecialEffects {
-  constructor() {
-    // this.computerCanvas = document.createElement("canvas");
-    // this.renderCanvas = document.createElement("canvas");
-    // this.computerContext = this.computerCanvas.getContext("2d");
-    // this.renderContext = this.renderCanvas.getContext("2d");
-    // this.globalWidth = window.innerWidth;
-    // this.globalHeight = window.innerHeight;
-    // this.booms = [];
-    // this.running = false;
-    // this.init();
-  }
-
-  reset() {
-    if (this.renderCanvas) document.body.removeChild(this.renderCanvas);
-
-    this.computerCanvas = document.createElement("canvas");
-    this.renderCanvas = document.createElement("canvas");
-
-    this.computerContext = this.computerCanvas.getContext("2d");
-    this.renderContext = this.renderCanvas.getContext("2d");
-
-    this.globalWidth = window.innerWidth;
-    this.globalHeight = window.innerHeight;
-
-    this.booms = [];
-    this.running = false;
-
-    this.init();
-  }
-
-  handleMouseDown(e) {
-    this.reset();
-
-    const boom = new Boom({
-      origin: { x: e.clientX, y: e.clientY },
-      context: this.computerContext,
-      area: {
-        width: this.globalWidth,
-        height: this.globalHeight
-      }
-    });
-    boom.init();
-    this.booms.push(boom);
-    this.running || this.run();
-  }
-
-  handlePageHide() {
-    this.booms = [];
-    this.running = false;
-  }
-
-  init() {
-    const style = this.renderCanvas.style;
-    style.position = "fixed";
-    style.top = style.left = 0;
-    style.zIndex = "999999999999999999999999999999999999999999";
-    style.pointerEvents = "none";
-
-    style.width = this.renderCanvas.width = this.computerCanvas.width = this.globalWidth;
-    style.height = this.renderCanvas.height = this.computerCanvas.height = this.globalHeight;
-
-    document.body.append(this.renderCanvas);
-
-    //window.addEventListener("mousedown", this.handleMouseDown.bind(this));
-    //window.addEventListener("pagehide", this.handlePageHide.bind(this));
-  }
-
-  run() {
-    this.running = true;
-    if (this.booms.length == 0) {
-      return (this.running = false);
-    }
-
-    requestAnimationFrame(this.run.bind(this));
-
-    this.computerContext.clearRect(0, 0, this.globalWidth, this.globalHeight);
-    this.renderContext.clearRect(0, 0, this.globalWidth, this.globalHeight);
-
-    this.booms.forEach((boom, index) => {
-      if (boom.stop) {
-        return this.booms.splice(index, 1);
-      }
-      boom.move();
-      boom.draw();
-    });
-    this.renderContext.drawImage(
-      this.computerCanvas,
-      0,
-      0,
-      this.globalWidth,
-      this.globalHeight
-    );
-  }
-}
-
-export default new CursorSpecialEffects();

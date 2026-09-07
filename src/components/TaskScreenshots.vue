@@ -34,7 +34,7 @@
           type="button"
           :aria-label="`删除第 ${index + 1} 张截图`"
           title="删除截图"
-          @click="$emit('delete', screenshot.id)"
+          @click="askDelete(screenshot.id, $event)"
         >
           ×
         </button>
@@ -61,10 +61,40 @@
       <button
         class="preview-delete"
         type="button"
-        @click="$emit('delete', preview.id)"
+        @click="askDelete(preview.id, $event)"
       >
         删除截图
       </button>
+    </div>
+    <div
+      v-if="deleteId"
+      class="confirm-overlay"
+      @click.self="closeDelete"
+      @keydown.esc.stop.prevent="closeDelete"
+      @keydown.tab.prevent="cycleConfirmFocus"
+    >
+      <div
+        class="confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="删除这张截图？"
+      >
+        <h3>删除这张截图？</h3>
+        <p>只删除截图，事项内容会保留。</p>
+        <div class="confirm-actions">
+          <button ref="cancelDelete" type="button" @click="closeDelete">
+            取消
+          </button>
+          <button
+            ref="confirmDelete"
+            class="danger"
+            type="button"
+            @click="confirmDelete"
+          >
+            删除截图
+          </button>
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -80,7 +110,14 @@ export default {
     expanded: { type: Boolean, default: false }
   },
   data() {
-    return { images: {}, preview: null, lastFocus: null, loadToken: 0 };
+    return {
+      images: {},
+      preview: null,
+      lastFocus: null,
+      loadToken: 0,
+      deleteId: "",
+      deleteFocus: null
+    };
   },
   watch: {
     expanded(value) {
@@ -101,6 +138,33 @@ export default {
     }
   },
   methods: {
+    askDelete(id, event) {
+      this.deleteId = id;
+      this.deleteFocus = event && event.currentTarget;
+      taskClient.setModal(true);
+      this.$nextTick(() => this.$refs.cancelDelete.focus());
+    },
+    closeDelete() {
+      this.deleteId = "";
+      taskClient.setModal(false);
+      const target = this.deleteFocus;
+      this.deleteFocus = null;
+      this.$nextTick(() => {
+        if (target && document.body.contains(target)) target.focus();
+      });
+    },
+    confirmDelete() {
+      const id = this.deleteId;
+      this.closeDelete();
+      if (id) this.$emit("delete", id);
+    },
+    cycleConfirmFocus() {
+      const target =
+        document.activeElement === this.$refs.cancelDelete
+          ? this.$refs.confirmDelete
+          : this.$refs.cancelDelete;
+      if (target) target.focus();
+    },
     async loadImages() {
       if (!this.expanded || this.task.hidden) return;
       const token = ++this.loadToken;
@@ -138,11 +202,13 @@ export default {
         });
     },
     clearImages() {
+      if (this.deleteId) this.closeDelete();
       this.loadToken += 1;
       this.closePreview(false);
       this.images = {};
     },
     onKeydown(event) {
+      if (this.deleteId) return;
       if (event.key === "Escape" && this.preview) this.closePreview();
     }
   },
@@ -162,6 +228,60 @@ export default {
   width: 100%;
   box-sizing: border-box;
   padding-left: 23px;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-app-region: no-drag;
+}
+.confirm-card {
+  width: 280px;
+  max-width: 100%;
+  padding: 20px;
+  border: 1px solid rgba(220, 235, 226, 0.16);
+  border-radius: 12px;
+  background: #202823;
+  color: #e8eee9;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+}
+.confirm-card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.confirm-card p {
+  margin: 0;
+  color: #abb8af;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.confirm-actions button {
+  border: 1px solid #536158;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #e8eee9;
+  background: transparent;
+  cursor: pointer;
+}
+.confirm-actions .danger {
+  background: #ad4c47;
+  border-color: #ad4c47;
+}
+.confirm-actions button:focus-visible {
+  outline: 2px solid #bad8c7;
+  outline-offset: 2px;
 }
 .screenshot-summary {
   appearance: none;

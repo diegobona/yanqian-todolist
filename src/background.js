@@ -33,6 +33,11 @@ let readyToQuit = false,
   pendingFlush = null,
   flushId = 0;
 let boundsWarningShown = false;
+let modalOpen = false;
+ipcMain.on("window:modal", (event, open) => {
+  if (win && !win.isDestroyed() && event.sender === win.webContents)
+    modalOpen = open === true;
+});
 let dockTimer,
   expandedBounds = null,
   dockBusy = false,
@@ -49,6 +54,10 @@ function expandDock() {
   outsideSince = 0;
 }
 async function checkDock() {
+  if (modalOpen) {
+    outsideSince = 0;
+    return;
+  }
   if (
     !win ||
     win.isDestroyed() ||
@@ -90,6 +99,7 @@ async function checkDock() {
       !win.isVisible() ||
       win.isMinimized() ||
       quitting ||
+      modalOpen ||
       contains(win.getBounds(), screen.getCursorScreenPoint()) ||
       Date.now() - lastWindowMove < 120
     )
@@ -404,6 +414,7 @@ async function init() {
     }
   });
   win.webContents.on("render-process-gone", () => {
+    modalOpen = false;
     controller.recover();
     dialog
       .showMessageBox({
