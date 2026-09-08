@@ -6,7 +6,7 @@
       "todo_date": "2026/09/07",
       "todo_datetime": "2026/09/07 21:53:00",
       "updated_at": "2026/09/07 21:53:11",
-      "hidden": true,
+      "hidden": false,
       "pinned": false,
       "screenshots": [],
       "tabId": "todo",
@@ -18,7 +18,7 @@
       "todo_date": "2026/09/07",
       "todo_datetime": "2026/09/07 21:53:51",
       "updated_at": "2026/09/07 21:53:59",
-      "hidden": true,
+      "hidden": false,
       "pinned": false,
       "screenshots": [
         {
@@ -40,24 +40,21 @@
       ],
       "tabId": "todo",
       "tabName": "待办"
-    }
-  ],
-  "doneList": [
+    },
     {
       "id": "a165a01e1760eb9a6f35f3dd68516812",
       "content": "上线软件",
       "todo_date": "2026/09/07",
       "todo_datetime": "2026/09/07 21:55:06",
-      "updated_at": "2026/09/07 21:57:49",
-      "hidden": true,
+      "updated_at": "2026/09/07 21:55:15",
+      "hidden": false,
       "pinned": false,
       "screenshots": [],
       "tabId": "todo",
-      "tabName": "待办",
-      "done_date": "2026/09/07",
-      "done_datetime": "2026/09/07 21:57:49"
+      "tabName": "待办"
     }
   ],
+  "doneList": [],
   "settings": {
     "hideHintSeen": true,
     "interfaceTransparency": 10,
@@ -65,11 +62,8 @@
   },
   "trashList": [],
   "schemaVersion": 1,
-  "revision": 918,
-  "lastCompletion": {
-    "id": "a165a01e1760eb9a6f35f3dd68516812",
-    "index": 2
-  },
+  "revision": 916,
+  "lastCompletion": null,
   "tabs": [
     {
       "id": "todo",

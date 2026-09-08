@@ -10,7 +10,7 @@ import {
   nativeImage
 } from "electron";
 import DB from "./db";
-import { relocateData } from "@/services/dataLocation";
+import { inspectDataLocation, relocateData } from "@/services/dataLocation";
 import path from "path";
 import pkg from "../../package.json";
 import ExcelJS from "exceljs";
@@ -20,6 +20,14 @@ const isTest = process.env.YANQIAN_TEST === "1";
 
 export function initExtra({ getWindow, controller, requestFlush }) {
   const repository = DB.repository;
+  let pendingDataDirectory = "";
+  const dataLocationConfigFile = () =>
+    path.join(
+      app.getPath("userData"),
+      process.env.NODE_ENV !== "production"
+        ? "data-location-dev.json"
+        : "data-location.json"
+    );
   const validSender = event =>
     getWindow() &&
     !getWindow().isDestroyed() &&
@@ -62,25 +70,61 @@ export function initExtra({ getWindow, controller, requestFlush }) {
       let value;
       switch (request.action) {
         case "changeDirectory": {
+          pendingDataDirectory = "";
           const selected = await dialog.showOpenDialog(parent, {
-            title: "选择保存位置（将在其中创建 yanqian-todo-list 文件夹）",
+            title: "选择保存位置",
             properties: ["openDirectory", "createDirectory"]
           });
           if (selected.canceled || !selected.filePaths.length)
             return { ok: true, value: { canceled: true } };
           if (!(await requestFlush()))
             throw Error("有内容尚未保存，请先重试保存");
+          const location = inspectDataLocation(
+            repository,
+            selected.filePaths[0]
+          );
+          if (location.current) {
+            value = "当前已经使用这个保存位置";
+            break;
+          }
+          if (location.hasExistingData) {
+            pendingDataDirectory = location.directory;
+            value = {
+              confirmation: "replaceData",
+              directory: location.directory
+            };
+            break;
+          }
           relocateData(
             repository,
-            selected.filePaths[0],
-            path.join(
-              app.getPath("userData"),
-              process.env.NODE_ENV !== "production"
-                ? "data-location-dev.json"
-                : "data-location.json"
-            )
+            location.directory,
+            dataLocationConfigFile()
           );
           value = "保存位置已更改，事项和截图已迁移";
+          break;
+        }
+        case "replaceDirectory": {
+          if (!pendingDataDirectory)
+            throw Error("保存位置选择已失效，请重新选择");
+          const confirmedDirectory = pendingDataDirectory;
+          if (!(await requestFlush()))
+            throw Error("有内容尚未保存，请先重试保存");
+          if (pendingDataDirectory !== confirmedDirectory)
+            throw Error("保存位置选择已取消，请重新选择");
+          pendingDataDirectory = "";
+          relocateData(
+            repository,
+            confirmedDirectory,
+            dataLocationConfigFile(),
+            { replace: true }
+          );
+          pendingDataDirectory = "";
+          value = "保存位置已更改，事项和截图已迁移";
+          break;
+        }
+        case "cancelDirectoryChange": {
+          pendingDataDirectory = "";
+          value = { canceled: true };
           break;
         }
         case "deleteTab": {
@@ -197,12 +241,16 @@ export function initExtra({ getWindow, controller, requestFlush }) {
 }
 
 export function createTray({ showWindow, hideWindow, showSettings, quit }) {
-  tray = new Tray(
-    path.join(
-      __static,
-      process.platform === "darwin" ? "tray-mac@2x.png" : "tray.png"
-    )
+  const iconPath = path.join(
+    __static,
+    process.platform === "darwin" ? "tray-mac@2x.png" : "tray.png"
   );
+  const trayIcon =
+    process.platform === "darwin"
+      ? nativeImage.createFromPath(iconPath)
+      : iconPath;
+  if (process.platform === "darwin") trayIcon.setTemplateImage(true);
+  tray = new Tray(trayIcon);
   const items = [
     { label: "显示眼前", click: showWindow },
     { label: "隐藏眼前", click: hideWindow },
@@ -227,9 +275,9 @@ export function createTray({ showWindow, hideWindow, showSettings, quit }) {
       label: "关于",
       click: () =>
         dialog.showMessageBox({
-          title: pkg.name,
+          title: pkg.productName,
           message: pkg.description,
-          detail: `Version: ${pkg.version}\nAuthor: ${pkg.author}`
+          detail: `版本：${pkg.version}`
         })
     },
     { label: "退出", click: quit }
@@ -251,7 +299,7 @@ export function createAppMenu() {
 }
 async function exportExcel(parent) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = pkg.name;
+  workbook.creator = pkg.productName;
   const todo = workbook.addWorksheet("todo list");
   todo.addRow(["内容", "建立时间"]);
   const done = workbook.addWorksheet("done list");

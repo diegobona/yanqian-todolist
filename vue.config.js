@@ -8,9 +8,9 @@ module.exports = {
         ...(process.env.YANQIAN_ELECTRON_DIST
           ? { electronDist: process.env.YANQIAN_ELECTRON_DIST }
           : {}),
-        appId: "xhznl-todo-list",
-        productName: "xhznl-todo-list",
-        copyright: "Copyright © 2020 xhznl",
+        appId: "com.yanqian.todo",
+        productName: "眼前",
+        copyright: "Copyright © 2026 Yanqian",
         directories: {
           buildResources: "./public"
           // output: "./dist", //输出文件路径
@@ -20,6 +20,7 @@ module.exports = {
         },
         win: {
           icon: "./public/logo.ico",
+          artifactName: "yanqian-todo-list Setup ${version}.${ext}",
           target: [
             {
               target: "nsis",
@@ -32,7 +33,11 @@ module.exports = {
         nsis: {
           oneClick: false,
           allowToChangeInstallationDirectory: true,
-          shortcutName: "xhznl-todo-list"
+          shortcutName: "眼前",
+          uninstallDisplayName: "眼前",
+          installerIcon: "./public/logo.ico",
+          uninstallerIcon: "./public/logo.ico",
+          installerHeaderIcon: "./public/logo.ico"
         },
         dmg: {
           contents: [

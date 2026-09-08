@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const { createRequire } = require('node:module');
 const babel = require('@babel/core');
+const { TaskRepository } = require('../src/services/taskRepository');
 
 const project = path.resolve(__dirname, '..');
 const nativeRequire = createRequire(path.join(project, 'package.json'));
@@ -16,7 +17,7 @@ const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE
 
 // Execute production main-process modules in an isolated module cache. Only
 // Electron and process/clock boundaries are replaced; repository I/O is real.
-async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null, initialSettings } = {}) {
+async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null, initialSettings, selectedDirectory = null } = {}) {
   const tempRoot = path.resolve(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'yanqian-background-test-'));
   const clock = new Map();
@@ -49,6 +50,7 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
     whenReady: () => Promise.resolve(),
     getPath: () => directory,
     setPath: () => {},
+    setName: name => calls.push(['setName', name]),
     quit() {
       const event = { prevented: false, preventDefault() { this.prevented = true; } };
       app.emit('before-quit', event);
@@ -115,7 +117,8 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
     },
     dialog: {
       showErrorBox: (title, message) => errors.push({ title, message }),
-      showMessageBox: async options => { calls.push(['showMessageBox', plain(options)]); return { response: 1 }; }
+      showMessageBox: async options => { calls.push(['showMessageBox', plain(options)]); return { response: 1 }; },
+      showOpenDialog: async options => { calls.push(['showOpenDialog', plain(options)]); return selectedDirectory ? { canceled: false, filePaths: [selectedDirectory] } : { canceled: true, filePaths: [] }; }
     },
     shell: { openPath: async () => '' },
     Notification: { isSupported: () => false },
@@ -278,6 +281,18 @@ test('confirmed tab deletion does not open a native dialog and moves tasks to tr
   const completed=await f.invoke('app:action',{action:'deleteTab',payload:{id:'done'}});assert.equal(completed.ok,false);assert.match(completed.error,/已完成/);
 });
 
+test('existing data location is confirmed in the renderer and then activated safely', async t => {
+  const externalRoot=fs.mkdtempSync(path.join(os.tmpdir(),'yanqian-existing-location-'));t.after(()=>fs.rmSync(externalRoot,{recursive:true,force:true}));
+  const target=path.join(externalRoot,'yanqian-todo-list');const existing=new TaskRepository({directory:target});existing.command('add',{content:'existing data'});
+  const f=await launch(t,{selectedDirectory:target});f.command('add',{content:'current data'});
+  const choose=f.invoke('app:action',{action:'changeDirectory'});await settle();f.reply(true);const choice=await choose;
+  assert.equal(choice.ok,true,choice.error);assert.deepEqual(plain(choice.value),{confirmation:'replaceData',directory:target});
+  const activate=f.invoke('app:action',{action:'replaceDirectory'});await settle();f.reply(true);const switched=await activate;
+  assert.equal(switched.ok,true,switched.error);assert.equal(switched.value,'保存位置已更改，事项和截图已迁移');
+  const active=f.command('add',{content:'after switch'});assert.equal(active.todoList[0].content,'current data');
+  assert.equal(new TaskRepository({directory:f.directory}).snapshot().todoList[0].content,'current data');
+});
+
 test('second instance recovers the actual main window without resetting saved valid coordinates', async t => {
   const savedBounds = { x: -1450, y: 110, width: 550, height: 750 };
   const f = await launch(t, { savedBounds });
@@ -418,4 +433,24 @@ test('shortcut registration conflict reports the failure while tray recovery rem
   f.trays[0].emit('click');
   assert.equal(f.win.visible, true);
   assert.ok(f.sent.some(message => message.channel === 'window:locked' && message.payload === false));
+});
+
+test('canceling a location conflict leaves both folders intact and invalidates replacement',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yanqian-cancel-location-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const target=new TaskRepository({directory:root});target.command('add',{content:'destination'});const bytes=fs.readFileSync(target.file);
+ const f=await launch(t,{selectedDirectory:root});f.command('add',{content:'current'});
+ const choose=f.invoke('app:action',{action:'changeDirectory'});await settle();f.reply(true);assert.equal((await choose).value.confirmation,'replaceData');
+ assert.equal((await f.invoke('app:action',{action:'cancelDirectoryChange'})).ok,true);
+ const result=await f.invoke('app:action',{action:'replaceDirectory'});assert.equal(result.ok,false);
+ assert.ok(fs.readFileSync(target.file).equals(bytes));assert.equal(new TaskRepository({directory:f.directory}).snapshot().todoList[0].content,'current');
+});
+
+test('cancel during save flush cannot redirect a pending replacement',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yanqian-flush-cancel-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const target=new TaskRepository({directory:root});target.command('add',{content:'destination'});const bytes=fs.readFileSync(target.file);
+ const f=await launch(t,{selectedDirectory:root});f.command('add',{content:'current'});
+ const choose=f.invoke('app:action',{action:'changeDirectory'});await settle();f.reply(true);await choose;
+ const replace=f.invoke('app:action',{action:'replaceDirectory'});await settle();
+ await f.invoke('app:action',{action:'cancelDirectoryChange'});f.reply(true);
+ assert.equal((await replace).ok,false);assert.ok(fs.readFileSync(target.file).equals(bytes));
 });

@@ -1,9 +1,10 @@
 {
-  "name": "xhznl-todo-list",
-  "version": "0.2.3",
+  "name": "yanqian-todo-list",
+  "productName": "眼前",
+  "version": "0.2.5",
   "private": true,
-  "author": "xhznl",
-  "description": "a todo list application",
+  "author": "Yanqian",
+  "description": "眼前：轻量、常驻的桌面待办",
   "scripts": {
     "serve": "node --openssl-legacy-provider node_modules/@vue/cli-service/bin/vue-cli-service.js serve",
     "build": "node --openssl-legacy-provider node_modules/@vue/cli-service/bin/vue-cli-service.js build",

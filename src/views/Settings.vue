@@ -34,7 +34,11 @@
       <div class="location">
         <div class="section-heading">
           <span class="location-label">保存位置</span
-          ><button :disabled="busy" @click="run('changeDirectory')">
+          ><button
+            ref="changeDirectory"
+            :disabled="busy"
+            @click="run('changeDirectory')"
+          >
             更改
           </button>
         </div>
@@ -120,6 +124,45 @@
         </div>
       </div>
     </div>
+    <div
+      v-if="locationChange"
+      class="confirm-overlay"
+      @click.self="closeLocationChange"
+      @keydown.esc.stop.prevent="closeLocationChange"
+      @keydown.tab.prevent="cycleLocationFocus"
+    >
+      <div
+        class="confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="location-confirm-title"
+        aria-describedby="location-confirm-description"
+      >
+        <h3 id="location-confirm-title">此位置已有数据，是否替换？</h3>
+        <p class="data-directory confirm-directory">
+          {{ locationChange.directory }}
+        </p>
+        <p id="location-confirm-description">
+          将用当前的事项和截图替换该位置的数据，原数据会自动保留一份副本。
+        </p>
+        <div class="confirm-actions">
+          <button
+            ref="cancelLocation"
+            :disabled="busy"
+            @click="closeLocationChange"
+          >
+            取消
+          </button>
+          <button
+            ref="confirmLocation"
+            :disabled="busy"
+            @click="confirmLocationChange"
+          >
+            替换并迁移
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 <script>
@@ -137,7 +180,8 @@ export default {
       interfaceTransparency: 30,
       busy: false,
       deletion: null,
-      deleteFocus: null
+      deleteFocus: null,
+      locationChange: null
     };
   },
   methods: {
@@ -178,6 +222,41 @@ export default {
           : this.$refs.cancelDelete;
       if (target) target.focus();
     },
+    closeLocationChange() {
+      if (this.busy) return;
+      taskClient.action("cancelDirectoryChange").catch(() => {});
+      this.dismissLocationChange();
+    },
+    dismissLocationChange() {
+      this.locationChange = null;
+      taskClient.setModal(false);
+      this.$nextTick(() => {
+        if (this.$refs.changeDirectory) this.$refs.changeDirectory.focus();
+      });
+    },
+    cycleLocationFocus() {
+      const target =
+        document.activeElement === this.$refs.cancelLocation
+          ? this.$refs.confirmLocation
+          : this.$refs.cancelLocation;
+      if (target) target.focus();
+    },
+    async confirmLocationChange() {
+      if (!this.locationChange || this.busy) return;
+      this.busy = true;
+      this.error = "";
+      try {
+        const result = await taskClient.action("replaceDirectory");
+        this.dismissLocationChange();
+        this.message = result;
+        this.reload();
+      } catch (error) {
+        this.dismissLocationChange();
+        this.error = error.message;
+      } finally {
+        this.busy = false;
+      }
+    },
     confirmDelete() {
       const deletion = this.deletion;
       if (!deletion) return;
@@ -213,7 +292,11 @@ export default {
       this.message = "";
       try {
         const result = await taskClient.action(action, payload);
-        if (!result || !result.canceled) this.message = result;
+        if (result && result.confirmation === "replaceData") {
+          this.locationChange = { directory: result.directory };
+          taskClient.setModal(true);
+          this.$nextTick(() => this.$refs.cancelLocation.focus());
+        } else if (!result || !result.canceled) this.message = result;
         this.reload();
       } catch (error) {
         this.error = error.message;
@@ -236,12 +319,14 @@ export default {
   created() {
     this.reload();
     this.refreshTimer = setInterval(() => {
-      if (!this.deletion && !this.busy) this.reload();
+      if (!this.deletion && !this.locationChange && !this.busy) this.reload();
     }, 60000);
   },
   beforeDestroy() {
     clearInterval(this.refreshTimer);
-    if (this.deletion) taskClient.setModal(false);
+    if (this.locationChange)
+      taskClient.action("cancelDirectoryChange").catch(() => {});
+    if (this.deletion || this.locationChange) taskClient.setModal(false);
   }
 };
 </script>
@@ -315,6 +400,11 @@ export default {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
+}
+.confirm-directory {
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
 }
 .confirm-actions {
   display: flex;

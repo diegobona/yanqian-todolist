@@ -170,5 +170,14 @@ test('settings shows concise retention copy and saves interface transparency liv
  assert.equal(slider.attributes('min'),'0');assert.equal(slider.attributes('max'),'70');
  slider.element.value='55';await slider.trigger('input');
  assert.equal(repo.snapshot().settings.interfaceTransparency,55);
- assert.match(wrapper.text(),/55%/);
+  assert.match(wrapper.text(),/55%/);
+});
+
+test('settings confirms switching to existing local data inside the app', async t => {
+ const {wrapper,client}=setup(t,'Settings.vue');client.metadata=()=>({directory:'C:/current/yanqian-todo-list'});
+ const actions=[];client.action=async action=>{actions.push(action);return action==='changeDirectory'?{confirmation:'replaceData',directory:'D:/notes/yanqian-todo-list'}:'已切换到该位置的眼前数据';};
+ await wrapper.vm.run('changeDirectory');await Vue.nextTick();
+ const dialog=wrapper.find('[role="alertdialog"]');assert.ok(dialog.exists());assert.match(dialog.text(),/此位置已有数据/);assert.match(dialog.text(),/原数据会自动保留一份副本/);
+ const use=wrapper.findAll('button').wrappers.find(button=>button.text()==='替换并迁移');await use.trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
+ assert.deepEqual(actions,['changeDirectory','replaceDirectory']);assert.equal(wrapper.find('[role="alertdialog"]').exists(),false);assert.match(wrapper.text(),/已切换到该位置/);
 });

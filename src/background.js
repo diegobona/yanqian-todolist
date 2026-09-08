@@ -1,3 +1,4 @@
+/* global __static */
 "use strict";
 import {
   app,
@@ -25,6 +26,7 @@ import { dockEdge, handleBounds, contains } from "@/services/edgeDock";
 import { prepareDataLocation, readDataLocation } from "@/services/dataLocation";
 const isDevelopment = process.env.NODE_ENV !== "production";
 const isTest = process.env.YANQIAN_TEST === "1";
+app.setName(pkg.productName);
 if (isTest && process.env.YANQIAN_DATA_DIR)
   app.setPath("userData", path.resolve(process.env.YANQIAN_DATA_DIR));
 let win, controller, repository, boundsTimer, backupTimer;
@@ -135,7 +137,10 @@ else {
     try {
       app.setPath(
         "userData",
-        prepareDataLocation(app.getPath("appData"), app.getPath("userData"))
+        prepareDataLocation(
+          app.getPath("appData"),
+          path.join(app.getPath("appData"), "xhznl-todo-list")
+        )
       );
     } catch (error) {
       locationError = error;
@@ -361,7 +366,8 @@ async function init() {
     movable: !windowLocked,
     resizable: !windowLocked,
     skipTaskbar: false,
-    title: pkg.name,
+    title: pkg.productName,
+    icon: path.join(__static, "logo.ico"),
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   controller = createWindowController({

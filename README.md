@@ -1,4 +1,4 @@
-# xhznl-todo-list
+# 眼前（yanqian-todo-list）
 
 :sparkles:一个使用 electron + vue + electron-builder 开发的跨平台 todolist（便签）桌面应用
 
@@ -63,8 +63,6 @@ npm run electron:build
 本项目使用较旧的 Vue CLI 4。`package.json` 已锁定兼容 Node 24 的
 `websocket-driver`，请保留 `package-lock.json` 并使用 `npm install` 安装依赖。
 
-下载 releases：https://github.com/xiajingren/xhznl-todo-list/releases
-
 ## 规划
 
 - [x] todo/done 基本功能
@@ -72,6 +70,6 @@ npm run electron:build
 - [x] 软件自动更新
 - [x] 数据导出为 excel
 - [x] 开机启动
-- [x] 鼠标穿透
-- [ ] 窗口贴边自动收起
+- [x] 窗口锁定
+- [x] 窗口贴边自动收起
 - [ ] ......
