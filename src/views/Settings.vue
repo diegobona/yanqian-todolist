@@ -9,6 +9,28 @@
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" class="message" role="status">{{ message }}</p>
+    <section class="settings-section" aria-label="开机自启动">
+      <div class="section-heading">
+        <div>
+          <h3 id="startup-label">开机自启动</h3>
+          <p id="startup-description" class="hint">登录电脑后，自动打开眼前</p>
+        </div>
+        <button
+          class="startup-switch"
+          type="button"
+          role="switch"
+          aria-labelledby="startup-label"
+          aria-describedby="startup-description"
+          :aria-checked="startup.enabled ? 'true' : 'false'"
+          :disabled="busy || !startup.supported || !!startup.error"
+          @click="toggleStartup"
+        >
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+      <p v-if="startup.error" class="error" role="alert">{{ startup.error }}</p>
+      <p v-else-if="!startup.supported" class="hint">安装后的眼前支持此设置</p>
+    </section>
     <section class="settings-section" aria-label="外观">
       <div class="section-heading">
         <h3>界面透明度</h3>
@@ -27,6 +49,28 @@
       <div class="range-labels" aria-hidden="true">
         <span>不透明</span><span>更透明</span>
       </div>
+    </section>
+    <section class="settings-section" aria-label="事项字号">
+      <div class="section-heading">
+        <h3>事项字号</h3>
+        <strong class="transparency-value">{{ taskFontSize }}</strong>
+      </div>
+      <input
+        v-model.number="taskFontSize"
+        class="transparency-slider"
+        type="range"
+        min="12"
+        max="28"
+        step="1"
+        aria-label="事项字号"
+        @input="saveTaskFontSize"
+      />
+      <div class="range-labels" aria-hidden="true">
+        <span>小</span><span>大</span>
+      </div>
+      <p class="font-preview" :style="{ fontSize: taskFontSize + 'px' }">
+        把在意的事，放在眼前。
+      </p>
     </section>
     <section class="settings-section" aria-label="本地数据">
       <h3>本地数据</h3>
@@ -177,7 +221,9 @@ export default {
       message: "",
       trash: [],
       directory: "",
+      startup: { supported: false, enabled: false },
       interfaceTransparency: 30,
+      taskFontSize: 16,
       busy: false,
       deletion: null,
       deleteFocus: null,
@@ -185,6 +231,39 @@ export default {
     };
   },
   methods: {
+    saveTaskFontSize(event) {
+      try {
+        const state = taskClient.command("setTaskFontSize", {
+          value: this.taskFontSize
+        });
+        this.taskFontSize = state.settings.taskFontSize;
+        this.error = "";
+        taskClient.changed();
+      } catch (error) {
+        this.error = error.message;
+        this.reload();
+        if (event) event.target.value = this.taskFontSize;
+      }
+    },
+    async toggleStartup() {
+      if (this.busy || !this.startup.supported || this.startup.error) return;
+      this.busy = true;
+      this.error = "";
+      this.message = "";
+      try {
+        this.startup = await taskClient.action("setLoginStartup", {
+          enabled: !this.startup.enabled
+        });
+      } catch (error) {
+        this.error = error.message;
+      } finally {
+        this.reload();
+        this.busy = false;
+      }
+    },
+    refreshOnFocus() {
+      if (!this.busy && !this.deletion && !this.locationChange) this.reload();
+    },
     saveTransparency() {
       try {
         const state = taskClient.command("setInterfaceTransparency", {
@@ -280,7 +359,10 @@ export default {
         const state = taskClient.snapshot();
         this.trash = state.trashList;
         this.interfaceTransparency = state.settings.interfaceTransparency;
-        this.directory = taskClient.metadata().directory;
+        this.taskFontSize = state.settings.taskFontSize;
+        const metadata = taskClient.metadata();
+        this.directory = metadata.directory;
+        this.startup = metadata.startup || { supported: false, enabled: false };
       } catch (error) {
         this.error = error.message;
       }
@@ -318,11 +400,13 @@ export default {
   },
   created() {
     this.reload();
+    window.addEventListener("focus", this.refreshOnFocus);
     this.refreshTimer = setInterval(() => {
       if (!this.deletion && !this.locationChange && !this.busy) this.reload();
     }, 60000);
   },
   beforeDestroy() {
+    window.removeEventListener("focus", this.refreshOnFocus);
     clearInterval(this.refreshTimer);
     if (this.locationChange)
       taskClient.action("cancelDirectoryChange").catch(() => {});
@@ -338,6 +422,37 @@ export default {
   margin: 0 auto;
   color: #e4ebe7;
   font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+.settings .startup-switch {
+  width: 40px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 20px;
+  border: 1px solid #64736a;
+  background: #35423a;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+.startup-switch span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #e4ebe7;
+  transition: transform 0.16s ease;
+}
+.settings .startup-switch[aria-checked="true"] {
+  background: #bad8c7;
+  border-color: #bad8c7;
+}
+.startup-switch[aria-checked="true"] span {
+  transform: translateX(16px);
+  background: #213b2c;
+}
+@media (prefers-reduced-motion: reduce) {
+  .startup-switch span {
+    transition: none;
+  }
 }
 .trash-tools {
   display: flex;
@@ -359,6 +474,14 @@ export default {
   justify-content: space-between;
   color: #85928a;
   font-size: 10px;
+}
+.font-preview {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
 }
 .trash-list {
   max-height: 280px;

@@ -10,6 +10,7 @@ function vueComponent(file,client){
   if(id==='../../package.json')return require('../package.json');
   if(id==='@/utils/taskClient')return{default:client,__esModule:true};
   if(id==='@/utils/fireworks')return{fireworks:()=>()=>{}};
+  if(id==='@/utils/outlineEditor')return require('../src/utils/outlineEditor');
   if(id==='@/utils/common')return{getDateStr:x=>x};
   if(id==='@/components/TaskScreenshots.vue')return{default:vueComponent(path.join(__dirname,'../src/components/TaskScreenshots.vue'),client),__esModule:true};
   return require(id);
@@ -25,6 +26,35 @@ function setup(t,name='Todo.vue'){
  t.after(()=>{wrapper.destroy();fs.rmSync(directory,{recursive:true,force:true});});
  return {wrapper,repo,client,directory,route,router,setFailure:v=>fail=v,options};
 }
+test('startup is the first setting and follows the saved system state on success and failure',async t=>{
+ const {wrapper,client,directory}=setup(t,'Settings.vue');
+ let enabled=true;
+ client.metadata=()=>({directory,startup:{supported:true,enabled}});
+ client.action=async(action,payload)=>{assert.equal(action,'setLoginStartup');enabled=payload.enabled;return{supported:true,enabled};};
+ wrapper.vm.reload();await Vue.nextTick();
+ assert.equal(wrapper.find('.settings-section').attributes('aria-label'),'开机自启动');
+ const control=()=>wrapper.find('button[role="switch"]');
+ assert.equal(control().attributes('aria-checked'),'true');
+ await control().trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
+ assert.equal(enabled,false);assert.equal(control().attributes('aria-checked'),'false');
+ client.action=async()=>{throw Error('开机自启动设置未生效');};
+ await control().trigger('click');await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick();
+ assert.equal(control().attributes('aria-checked'),'false');assert.match(wrapper.text(),/未生效/);
+ enabled=true;window.dispatchEvent(new Event('focus'));await Vue.nextTick();
+ assert.equal(control().attributes('aria-checked'),'true');
+});
+test('settings saves task font size immediately and restores it on failed writes',async t=>{
+ const {wrapper,repo,setFailure}=setup(t,'Settings.vue');
+ const slider=wrapper.find('input[aria-label="事项字号"]');
+ assert.ok(slider.exists());
+ slider.element.value='24';await slider.trigger('input');
+ assert.equal(repo.snapshot().settings.taskFontSize,24);
+ assert.equal(wrapper.find('.font-preview').element.style.fontSize,'24px');
+ setFailure(true);slider.element.value='20';await slider.trigger('input');
+ assert.equal(repo.snapshot().settings.taskFontSize,24);
+ assert.equal(slider.element.value,'24');
+ assert.match(wrapper.text(),/disk denied/);
+});
 test('input, IME and immediate leave persist without waiting for a timer',async t=>{
  const {wrapper,repo,client}=setup(t);wrapper.vm.add();await Vue.nextTick();const input=wrapper.find('textarea[aria-label="编辑事项"]');
  input.element.value='中文输入';await input.trigger('compositionend');assert.equal(repo.snapshot().todoList[0].content,'中文输入');
@@ -112,7 +142,7 @@ test('single click edits immediately and multiline text survives saving and comp
  const {wrapper,repo}=setup(t);repo.command('add',{content:'第一行'});wrapper.vm.reload();await Vue.nextTick();
  await wrapper.find('.item').trigger('click');const editor=wrapper.find('textarea[aria-label="编辑事项"]');assert.ok(editor.exists());
  await editor.setValue('第一行\n第二行');await editor.trigger('keydown',{key:'Enter',keyCode:13});assert.ok(wrapper.vm.editId,'Enter must keep editing');
- const id=wrapper.vm.editId;wrapper.vm.edited();assert.equal(repo.snapshot().todoList[0].content,'第一行\n第二行');repo.command('complete',{id});assert.equal(repo.snapshot().doneList[0].content,'第一行\n第二行');
+ const id=wrapper.vm.editId;wrapper.vm.edited();assert.equal(repo.snapshot().todoList[0].content,'第一行\n第二行\n▪ ');repo.command('complete',{id});assert.equal(repo.snapshot().doneList[0].content,'第一行\n第二行\n▪ ');
 });
 
 test('same-view tab navigation is blocked when the current draft cannot save',async t=>{
@@ -126,6 +156,15 @@ test('Ctrl+S saves multiline text and the editor hint disappears',async t=>{
  const editor=wrapper.find('textarea');await editor.setValue('一\n二');await editor.trigger('keydown',{key:'s',keyCode:83,ctrlKey:true});
  assert.equal(wrapper.vm.editId,'');assert.equal(wrapper.find('.editor-hint').exists(),false);assert.equal(repo.snapshot().todoList[0].content,'一\n二');
 });
+test('Enter creates square items, Tab changes hierarchy and Backspace removes the square',async t=>{
+ const {wrapper,repo}=setup(t);repo.command('add',{content:'主题'});wrapper.vm.reload();await Vue.nextTick();await wrapper.find('.item').trigger('click');
+ const editor=wrapper.find('textarea');editor.element.setSelectionRange(2,2);await editor.trigger('keydown',{key:'Enter',keyCode:13});
+ assert.equal(editor.element.value,'主题\n▪ ');assert.equal(repo.snapshot().todoList[0].content,'主题\n▪ ');assert.match(wrapper.find('.editor-hint').text(),/Tab/);
+ editor.element.value='主题\n▪ 子项';editor.element.setSelectionRange(7,7);await editor.trigger('input');await editor.trigger('keydown',{key:'Tab',keyCode:9});
+ assert.equal(editor.element.value,'主题\n  ▪ 子项');assert.equal(repo.snapshot().todoList[0].content,'主题\n  ▪ 子项');
+ editor.element.setSelectionRange(7,7);await editor.trigger('keydown',{key:'Backspace',keyCode:8});
+ assert.equal(editor.element.value,'主题\n  子项');assert.equal(repo.snapshot().todoList[0].content,'主题\n  子项');
+});
 
 test('pinning moves a task to the top without opening editor and can be cancelled',async t=>{
  const {wrapper,repo}=setup(t);repo.command('add',{content:'ordinary'});repo.command('add',{content:'important'});wrapper.vm.reload();await Vue.nextTick();
@@ -133,10 +172,21 @@ test('pinning moves a task to the top without opening editor and can be cancelle
  assert.equal(wrapper.vm.allowTaskMove({draggedContext:{element:{pinned:true}},relatedContext:{element:{pinned:false}}}),false);
  await wrapper.find('.pin-toggle').trigger('click');assert.ok(repo.snapshot().todoList.every(item=>!item.pinned));
 });
-test('long tasks show 100 characters with a full hover title and remain intact in editing',async t=>{
- const {wrapper,repo}=setup(t);const full='文'.repeat(100)+'😀末尾';repo.command('add',{content:full});wrapper.vm.reload();await Vue.nextTick();
- const text=wrapper.find('.item-main p');assert.equal(text.text(),'1.'+'文'.repeat(100)+'…');assert.equal(text.attributes('title'),full);
+test('multiline todo text starts folded, expands without truncation and keeps editing intact',async t=>{
+ const {wrapper,repo}=setup(t);const full='第一行\n第二行仍然完整，结尾😀';repo.command('add',{content:full});wrapper.vm.reload();await Vue.nextTick();
+ const text=wrapper.find('.item-main p');Object.defineProperties(text.element,{clientHeight:{configurable:true,value:28},scrollHeight:{configurable:true,value:56}});wrapper.vm.measureTextOverflow();await Vue.nextTick();
+ assert.equal(text.text(),'1.'+full);assert.equal(text.attributes('title'),undefined);assert.ok(text.classes('text-collapsed'));
+ const toggle=wrapper.find('.task-expand');assert.equal(toggle.text(),'展开');assert.equal(toggle.attributes('aria-expanded'),'false');
+ await toggle.trigger('click');assert.equal(wrapper.vm.editId,'');assert.equal(wrapper.find('.task-expand').text(),'收起');assert.ok(!wrapper.find('.item-main p').classes('text-collapsed'));
+ Object.defineProperty(text.element,'scrollHeight',{configurable:true,value:28});
+ await wrapper.find('.task-expand').trigger('click');await Vue.nextTick();assert.ok(wrapper.find('.item-main p').classes('text-collapsed'));assert.equal(wrapper.find('.task-expand').exists(),false);
  await wrapper.find('.item').trigger('click');assert.equal(wrapper.find('textarea').element.value,full);
+});
+test('completed multiline text uses the same fold and expand interaction',async t=>{
+ const {wrapper,repo}=setup(t,'Done.vue');const id=repo.command('add',{content:'完成第一行\n完成第二行'}).todoList[0].id;repo.command('complete',{id});wrapper.vm.reload();await Vue.nextTick();
+ const text=wrapper.find('.item-main p');Object.defineProperties(text.element,{clientHeight:{configurable:true,value:28},scrollHeight:{configurable:true,value:56}});wrapper.vm.measureTextOverflow();await Vue.nextTick();
+ assert.ok(text.classes('text-collapsed'));assert.equal(wrapper.find('.task-expand').text(),'展开');assert.equal(text.attributes('title'),undefined);
+ await wrapper.find('.task-expand').trigger('click');assert.equal(wrapper.find('.task-expand').text(),'收起');assert.equal(wrapper.find('.item-main p').text(),'完成第一行\n完成第二行');
 });
 
 test('settings trash confirmation cancels safely and deletes only after confirmation', async t => {

@@ -7,11 +7,24 @@
       <div class="item" v-for="done in group.items" :key="done.id">
         <div class="item-main">
           <p
-            :class="{ concealed: done.hidden }"
-            :title="done.hidden ? '事项已隐藏' : done.content"
+            ref="taskText"
+            :data-task-id="done.id"
+            :class="{
+              concealed: done.hidden,
+              'text-collapsed': !isTextExpanded(done.id)
+            }"
           >
-            {{ done.hidden ? "••••••" : previewText(done.content) }}
+            {{ done.hidden ? "••••••" : done.content }}
           </p>
+          <button
+            v-if="!done.hidden && textOverflowIds.includes(done.id)"
+            class="task-expand"
+            type="button"
+            :aria-expanded="String(isTextExpanded(done.id))"
+            @click="toggleText(done.id)"
+          >
+            {{ isTextExpanded(done.id) ? "收起" : "展开" }}
+          </button>
           <i
             :class="[
               'iconfont',
@@ -50,12 +63,40 @@ export default {
   name: "Done",
   components: { TaskScreenshots },
   data() {
-    return { groups: [], error: "", expandedId: "" };
+    return {
+      groups: [],
+      error: "",
+      expandedId: "",
+      expandedTextIds: [],
+      textOverflowIds: []
+    };
   },
   methods: {
-    previewText(content) {
-      const chars = Array.from(content || "");
-      return chars.length > 100 ? chars.slice(0, 100).join("") + "…" : content;
+    isTextExpanded(id) {
+      return this.expandedTextIds.includes(id);
+    },
+    toggleText(id) {
+      const collapsing = this.isTextExpanded(id);
+      this.expandedTextIds = collapsing
+        ? this.expandedTextIds.filter(itemId => itemId !== id)
+        : [...this.expandedTextIds, id];
+      if (collapsing) this.$nextTick(this.measureTextOverflow);
+    },
+    measureTextOverflow() {
+      const refs = this.$refs.taskText || [];
+      const elements = Array.isArray(refs) ? refs : [refs];
+      const previous = new Set(this.textOverflowIds);
+      this.textOverflowIds = elements
+        .filter(element => {
+          const id = element.dataset.taskId;
+          return this.isTextExpanded(id)
+            ? previous.has(id)
+            : element.scrollHeight > element.clientHeight + 1;
+        })
+        .map(element => element.dataset.taskId);
+    },
+    onWindowResize() {
+      this.$nextTick(this.measureTextOverflow);
     },
     dateLabel(value) {
       return /^\d{4}[/-]\d{2}[/-]\d{2}$/.test(value)
@@ -74,6 +115,12 @@ export default {
           date,
           items
         })).sort((a, b) => b.date.localeCompare(a.date));
+        const visibleIds = new Set(
+          this.groups.flatMap(group => group.items.map(item => item.id))
+        );
+        this.expandedTextIds = this.expandedTextIds.filter(id =>
+          visibleIds.has(id)
+        );
         if (
           this.expandedId &&
           !this.groups.some(group =>
@@ -84,6 +131,7 @@ export default {
         )
           this.expandedId = "";
         this.error = "";
+        this.$nextTick(this.measureTextOverflow);
       } catch (error) {
         this.error = error.message;
       }
@@ -132,9 +180,11 @@ export default {
   created() {
     this.reload();
     window.addEventListener("tasks:changed", this.reload);
+    window.addEventListener("resize", this.onWindowResize);
   },
   beforeDestroy() {
     window.removeEventListener("tasks:changed", this.reload);
+    window.removeEventListener("resize", this.onWindowResize);
   }
 };
 </script>
@@ -163,10 +213,13 @@ export default {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: var(--task-font-size, 16px);
+  line-height: 1.75;
+}
+.item-main p.text-collapsed {
+  max-height: 1.75em;
 }
 .concealed {
   letter-spacing: 2px;
@@ -185,6 +238,19 @@ button {
   padding: 2px 4px;
   font-size: 11px;
   cursor: pointer;
+}
+.task-expand {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 1px 5px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #bdc9c1;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.task-expand:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 .empty {
   opacity: 0.6;

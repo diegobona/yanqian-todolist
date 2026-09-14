@@ -17,7 +17,7 @@ const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE
 
 // Execute production main-process modules in an isolated module cache. Only
 // Electron and process/clock boundaries are replaced; repository I/O is real.
-async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null, initialSettings, selectedDirectory = null } = {}) {
+async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng = null, initialSettings, selectedDirectory = null, installedStartup = false } = {}) {
   const tempRoot = path.resolve(os.tmpdir());
   const directory = fs.mkdtempSync(path.join(tempRoot, 'yanqian-background-test-'));
   const clock = new Map();
@@ -44,8 +44,11 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
   ipcMain.handle = (channel, handler) => handlers.set(channel, handler);
   const app = new EventEmitter();
   let quitCount = 0;
+  let loginEnabled = false;
   Object.assign(app, {
-    isPackaged: false,
+    isPackaged: installedStartup,
+    getLoginItemSettings: () => ({openAtLogin: loginEnabled, executableWillLaunchAtLogin: loginEnabled}),
+    setLoginItemSettings(value) { calls.push(['loginStartup', plain(value)]); loginEnabled = value.openAtLogin; },
     requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(),
     getPath: () => directory,
@@ -138,7 +141,7 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
   };
   const processBoundary = new EventEmitter();
   Object.assign(processBoundary, {
-    env: { NODE_ENV: 'production', YANQIAN_TEST: '1', YANQIAN_DATA_DIR: directory },
+    env: { NODE_ENV: 'production', YANQIAN_TEST: installedStartup ? '0' : '1', YANQIAN_DATA_DIR: directory },
     platform: 'win32', argv: ['node', 'background.js'], execPath: process.execPath
   });
   function addTimer(callback, delay, repeat) {
@@ -193,6 +196,12 @@ async function launch(t, { savedBounds, shortcutConflict = false, clipboardPng =
     app, win, trays, calls, sent, shortcuts, directory, stateFile,
     quitCount: () => quitCount,
     invoke: (channel, payload) => handlers.get(channel)({ sender: win.webContents }, payload),
+    metadata() {
+      const event = { sender: win.webContents };
+      ipcMain.emit('tasks:request', event, { action: 'metadata' });
+      assert.equal(event.returnValue.ok, true);
+      return plain(event.returnValue.value);
+    },
     latestFlush,
     reply(ok, { id = latestFlush().payload, sender = win.webContents } = {}) {
       ipcMain.emit('window:flush-result', { sender }, { id, ok });
@@ -453,4 +462,21 @@ test('cancel during save flush cannot redirect a pending replacement',async t=>{
  const replace=f.invoke('app:action',{action:'replaceDirectory'});await settle();
  await f.invoke('app:action',{action:'cancelDirectoryChange'});f.reply(true);
  assert.equal((await replace).ok,false);assert.ok(fs.readFileSync(target.file).equals(bytes));
+});
+
+test('settings IPC and tray share installed startup state without modifying task data', async t => {
+  const app = await launch(t, { installedStartup: true });
+  const original = app.command('add', { content: 'keep this task' });
+  assert.equal(app.metadata().startup.enabled, false);
+  assert.equal(app.calls.some(call => call[0] === 'loginStartup'), false, 'startup is opt-in');
+  const result = await app.invoke('app:action', { action: 'setLoginStartup', payload: { enabled: true } });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(app.metadata().startup.enabled, true);
+  const trayItem = app.trays[0].menu.find(item => item.label === '开机自启动');
+  assert.equal(trayItem.checked, true);
+  trayItem.click({ checked: false });
+  assert.equal(app.metadata().startup.enabled, false);
+  assert.equal(app.trays[0].menu.find(item => item.label === '开机自启动').checked, false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(app.directory, 'data.json'), 'utf8')).revision, original.revision);
+  assert.equal((await app.invoke('app:action', { action: 'setLoginStartup', payload: { enabled: 'true' } })).ok, false);
 });

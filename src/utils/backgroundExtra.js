@@ -11,12 +11,19 @@ import {
 } from "electron";
 import DB from "./db";
 import { inspectDataLocation, relocateData } from "@/services/dataLocation";
+import { createLoginStartup } from "@/services/loginStartup";
 import path from "path";
 import pkg from "../../package.json";
 import ExcelJS from "exceljs";
 import { getNowDateTimeForFlieName } from "@/utils/common";
 let tray;
 const isTest = process.env.YANQIAN_TEST === "1";
+const loginStartup = createLoginStartup({
+  app,
+  platform: process.platform,
+  testMode: isTest
+});
+let refreshStartupMenu = () => {};
 
 export function initExtra({ getWindow, controller, requestFlush }) {
   const repository = DB.repository;
@@ -43,6 +50,7 @@ export function initExtra({ getWindow, controller, requestFlush }) {
         case "metadata":
           value = {
             directory: repository.directory,
+            startup: loginStartup.read(),
             backups: repository.listBackups(),
             recoveryNotice: repository.recoveryNotice || "",
             accelerator: controller.getAccelerator() || "",
@@ -69,6 +77,15 @@ export function initExtra({ getWindow, controller, requestFlush }) {
       const parent = getWindow();
       let value;
       switch (request.action) {
+        case "setLoginStartup":
+          try {
+            value = loginStartup.set(
+              request.payload && request.payload.enabled
+            );
+          } finally {
+            refreshStartupMenu();
+          }
+          break;
         case "changeDirectory": {
           pendingDataDirectory = "";
           const selected = await dialog.showOpenDialog(parent, {
@@ -257,18 +274,19 @@ export function createTray({ showWindow, hideWindow, showSettings, quit }) {
     { label: "设置", click: showSettings },
     { type: "separator" },
     {
-      label: "开机启动",
+      label: "开机自启动",
       type: "checkbox",
-      checked: !isTest && app.getLoginItemSettings().openAtLogin,
+      checked: loginStartup.read().enabled,
+      enabled: loginStartup.read().supported,
       click(item) {
-        if (isTest) return;
-        const options = { openAtLogin: item.checked };
-        if (!app.isPackaged)
-          Object.assign(options, {
-            path: process.execPath,
-            args: [path.resolve(process.argv[1])]
-          });
-        app.setLoginItemSettings(options);
+        try {
+          loginStartup.set(item.checked);
+        } catch (error) {
+          showSettings();
+          dialog.showErrorBox("开机自启动设置失败", error.message);
+        } finally {
+          refreshStartupMenu();
+        }
       }
     },
     {
@@ -282,7 +300,15 @@ export function createTray({ showWindow, hideWindow, showSettings, quit }) {
     },
     { label: "退出", click: quit }
   ];
-  tray.setContextMenu(Menu.buildFromTemplate(items));
+  refreshStartupMenu = () => {
+    const state = loginStartup.read();
+    const item = items.find(item => item.label === "开机自启动");
+    item.checked = state.enabled;
+    item.enabled = state.supported && !state.error;
+    tray.setContextMenu(Menu.buildFromTemplate(items));
+  };
+  refreshStartupMenu();
+  tray.on("right-click", refreshStartupMenu);
   tray.setToolTip("眼前");
   tray.on("click", showWindow);
   tray.on("double-click", showWindow);

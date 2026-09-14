@@ -6,7 +6,7 @@
       "todo_date": "2026/09/07",
       "todo_datetime": "2026/09/07 21:53:00",
       "updated_at": "2026/09/07 21:53:11",
-      "hidden": false,
+      "hidden": true,
       "pinned": false,
       "screenshots": [],
       "tabId": "todo",
@@ -18,7 +18,7 @@
       "todo_date": "2026/09/07",
       "todo_datetime": "2026/09/07 21:53:51",
       "updated_at": "2026/09/07 21:53:59",
-      "hidden": false,
+      "hidden": true,
       "pinned": false,
       "screenshots": [
         {
@@ -42,72 +42,56 @@
       "tabName": "待办"
     },
     {
-      "id": "a165a01e1760eb9a6f35f3dd68516812",
-      "content": "上线软件",
-      "todo_date": "2026/09/07",
-      "todo_datetime": "2026/09/07 21:55:06",
-      "updated_at": "2026/09/07 21:55:15",
+      "id": "6c78891a9d658473ed3dec14bb8884b0",
+      "content": "说的是发给对方公司的风格发生的故事是的\n分公司的分公司的分公司的高富帅的官方说\n的分公司的分公司的分公司地方根深蒂固",
+      "todo_date": "2026/09/14",
+      "todo_datetime": "2026/09/14 22:30:21",
+      "updated_at": "2026/09/14 22:33:10",
       "hidden": false,
       "pinned": false,
-      "screenshots": [],
-      "tabId": "todo",
-      "tabName": "待办"
+      "screenshots": [
+        {
+          "id": "e370ea432e5e81bbd3a39aa7bb5e8300",
+          "fileName": "e370ea432e5e81bbd3a39aa7bb5e8300.png",
+          "created_at": "2026/09/14 22:30:40",
+          "width": 588,
+          "height": 274,
+          "size": 200294
+        }
+      ],
+      "tabId": "ddff880439b2d06ad602ed3c2673c590",
+      "tabName": "考试准备"
     }
   ],
   "doneList": [
     {
-      "id": "ca7dd8182ce150eab74bdcf40e992628",
-      "content": "联系小李",
+      "id": "a165a01e1760eb9a6f35f3dd68516812",
+      "content": "上线软件",
       "todo_date": "2026/09/07",
-      "todo_datetime": "2026/09/07 21:35:58",
-      "updated_at": "2026/09/07 21:48:12",
-      "hidden": false,
+      "todo_datetime": "2026/09/07 21:55:06",
+      "updated_at": "2026/09/07 21:57:49",
+      "hidden": true,
       "pinned": false,
       "screenshots": [],
       "tabId": "todo",
       "tabName": "待办",
       "done_date": "2026/09/07",
-      "done_datetime": "2026/09/07 21:48:12"
+      "done_datetime": "2026/09/07 21:57:49"
     }
   ],
   "settings": {
     "hideHintSeen": true,
     "interfaceTransparency": 10,
-    "windowLocked": false
+    "windowLocked": false,
+    "taskFontSize": 16
   },
-  "trashList": [
-    {
-      "task": {
-        "id": "cc69dfa2c9e04cc97462ed2038acff3f",
-        "content": "出差事项",
-        "todo_date": "2026/09/07",
-        "todo_datetime": "2026/09/07 21:37:01",
-        "updated_at": "2026/09/07 21:48:13",
-        "hidden": true,
-        "pinned": false,
-        "screenshots": [
-          {
-            "id": "c2c858363e146ec9519651df4804a65a",
-            "fileName": "c2c858363e146ec9519651df4804a65a.png",
-            "created_at": "2026/09/07 21:37:28",
-            "width": 524,
-            "height": 304,
-            "size": 191580
-          }
-        ],
-        "tabId": "todo",
-        "tabName": "待办",
-        "done_date": "2026/09/07",
-        "done_datetime": "2026/09/07 21:48:13"
-      },
-      "list": "doneList",
-      "index": 0,
-      "deleted_at": "2026/09/07 21:48:16"
-    }
-  ],
+  "trashList": [],
   "schemaVersion": 1,
-  "revision": 912,
-  "lastCompletion": null,
+  "revision": 1006,
+  "lastCompletion": {
+    "id": "a165a01e1760eb9a6f35f3dd68516812",
+    "index": 2
+  },
   "tabs": [
     {
       "id": "todo",

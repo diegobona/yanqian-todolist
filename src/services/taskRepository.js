@@ -154,6 +154,14 @@ function normalize(raw) {
     return entry;
   });
   state.settings = state.settings || {};
+  if (state.settings.taskFontSize === undefined)
+    state.settings.taskFontSize = 16;
+  if (
+    !Number.isInteger(state.settings.taskFontSize) ||
+    state.settings.taskFontSize < 12 ||
+    state.settings.taskFontSize > 28
+  )
+    throw Error("事项字号设置无效");
   if (state.settings.interfaceTransparency === undefined)
     state.settings.interfaceTransparency = 30;
   if (
@@ -640,6 +648,16 @@ class TaskRepository {
         destructive = true;
         break;
       }
+      case "setTaskFontSize": {
+        if (
+          !Number.isInteger(payload.value) ||
+          payload.value < 12 ||
+          payload.value > 28
+        )
+          throw Error("事项字号设置无效");
+        next.settings.taskFontSize = payload.value;
+        break;
+      }
       case "setInterfaceTransparency": {
         if (
           !Number.isInteger(payload.value) ||
@@ -659,6 +677,13 @@ class TaskRepository {
       case "settings": {
         if (!payload || typeof payload !== "object" || Array.isArray(payload))
           throw Error("设置无效");
+        if (
+          payload.taskFontSize !== undefined &&
+          (!Number.isInteger(payload.taskFontSize) ||
+            payload.taskFontSize < 12 ||
+            payload.taskFontSize > 28)
+        )
+          throw Error("事项字号设置无效");
         if (
           payload.interfaceTransparency !== undefined &&
           (!Number.isInteger(payload.interfaceTransparency) ||

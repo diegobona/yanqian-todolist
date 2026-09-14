@@ -30,6 +30,22 @@ test('interface transparency defaults to 30 and only accepts 0 through 70', t =>
   assert.throws(()=>repo.command('setInterfaceTransparency', {value:30.5}), /透明度/);
 });
 
+test('task font size migrates old data, persists and rejects invalid sizes', t => {
+  const {repo, reopen, directory} = fixture(t, {todoList:[],doneList:[],settings:{}});
+  assert.equal(repo.snapshot().settings.taskFontSize, 16);
+  repo.command('setTaskFontSize', {value:24});
+  assert.equal(reopen().snapshot().settings.taskFontSize, 24);
+  for (const value of [11,29,16.5,'20',null]) {
+    assert.throws(()=>repo.command('setTaskFontSize', {value}), /字号/);
+    assert.equal(repo.snapshot().settings.taskFontSize,24);
+  }
+  const backup = path.join(directory, 'export.json');
+  repo.exportTo(backup);
+  repo.command('setTaskFontSize', {value:12});
+  repo.importFrom(backup);
+  assert.equal(repo.snapshot().settings.taskFontSize,24);
+});
+
 test('window lock defaults off, persists and requires a boolean', t => {
   const {repo, reopen} = fixture(t);
   assert.equal(repo.snapshot().settings.windowLocked, false);

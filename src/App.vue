@@ -228,7 +228,8 @@ export default {
       tabsOverflowing: false,
       canScrollLeft: false,
       canScrollRight: false,
-      interfaceTransparency: 30
+      interfaceTransparency: 30,
+      taskFontSize: 16
     };
   },
   watch: {
@@ -243,9 +244,13 @@ export default {
   },
   computed: {
     interfaceStyle() {
-      if (this.dockEdge) return { backgroundColor: "transparent" };
       const alpha = (100 - this.interfaceTransparency) / 100;
-      return { backgroundColor: `rgba(0, 0, 0, ${alpha})` };
+      return {
+        backgroundColor: this.dockEdge
+          ? "transparent"
+          : `rgba(0, 0, 0, ${alpha})`,
+        "--task-font-size": `${this.taskFontSize}px`
+      };
     },
     activeTabId() {
       if (this.$route.path !== "/") return "";
@@ -441,6 +446,7 @@ export default {
         const tasks = [...snapshot.todoList, ...snapshot.doneList];
         this.hasTasks = tasks.length > 0;
         this.interfaceTransparency = snapshot.settings.interfaceTransparency;
+        this.taskFontSize = snapshot.settings.taskFontSize;
         this.windowLocked = snapshot.settings.windowLocked;
         this.allTasksHidden =
           this.hasTasks && tasks.every(item => item.hidden === true);

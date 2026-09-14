@@ -35,13 +35,17 @@
           />
           <p
             v-if="todo.id !== editId"
-            :class="{ concealed: todo.hidden }"
-            :title="todo.hidden ? '事项已隐藏' : todo.content"
+            ref="taskText"
+            :data-task-id="todo.id"
+            :class="{
+              concealed: todo.hidden,
+              'text-collapsed': !isTextExpanded(todo.id)
+            }"
           >
             {{ index + 1 }}.{{
               todo.hidden
                 ? "••••••"
-                : previewText(todo.content) || "空白草稿（点击继续编辑）"
+                : todo.content || "空白草稿（点击继续编辑）"
             }}
           </p>
           <div class="edit" v-else>
@@ -55,6 +59,9 @@
               @click.stop
               @dblclick.stop
               @keydown.esc="cancel($event)"
+              @keydown.enter="continueOutline($event)"
+              @keydown.tab.prevent.stop="changeOutlineLevel($event)"
+              @keydown.backspace="deleteOutlineBullet($event)"
               @keydown.ctrl.s.prevent.stop="edited($event)"
               @keydown.meta.s.prevent.stop="edited($event)"
               spellcheck="false"
@@ -71,6 +78,19 @@
               @click.stop="clear(todo.id)"
             ></i>
           </div>
+          <button
+            v-if="
+              !todo.hidden &&
+                todo.id !== editId &&
+                textOverflowIds.includes(todo.id)
+            "
+            class="task-expand"
+            type="button"
+            :aria-expanded="String(isTextExpanded(todo.id))"
+            @click.stop="toggleText(todo.id)"
+          >
+            {{ isTextExpanded(todo.id) ? "收起" : "展开" }}
+          </button>
           <button
             v-if="!todo.hidden"
             class="screenshot-paste"
@@ -117,7 +137,7 @@
           ></i>
         </div>
         <p v-if="todo.id === editId" class="editor-hint" @click.stop>
-          Enter 换行 · Ctrl+S 保存
+          Enter 添加方块 · Tab 调整层级 · Ctrl+S 保存
         </p>
         <TaskScreenshots
           v-if="!todo.hidden && todo.screenshots && todo.screenshots.length"
@@ -140,6 +160,7 @@ import draggable from "vuedraggable";
 import { fireworks } from "@/utils/fireworks";
 import taskClient from "@/utils/taskClient";
 import TaskScreenshots from "@/components/TaskScreenshots.vue";
+import outlineEditor from "@/utils/outlineEditor";
 
 export default {
   name: "Todo",
@@ -155,6 +176,8 @@ export default {
       error: "",
       notice: "",
       expandedId: "",
+      expandedTextIds: [],
+      textOverflowIds: [],
       screenshotBusy: false,
       pasteQueue: Promise.resolve()
     };
@@ -170,9 +193,32 @@ export default {
       const to = event.relatedContext.element;
       return !to || !!from.pinned === !!to.pinned;
     },
-    previewText(content) {
-      const chars = Array.from(content || "");
-      return chars.length > 100 ? chars.slice(0, 100).join("") + "…" : content;
+    isTextExpanded(id) {
+      return this.expandedTextIds.includes(id);
+    },
+    toggleText(id) {
+      const collapsing = this.isTextExpanded(id);
+      this.expandedTextIds = collapsing
+        ? this.expandedTextIds.filter(itemId => itemId !== id)
+        : [...this.expandedTextIds, id];
+      if (collapsing) this.$nextTick(this.measureTextOverflow);
+    },
+    measureTextOverflow() {
+      const refs = this.$refs.taskText || [];
+      const elements = Array.isArray(refs) ? refs : [refs];
+      const previous = new Set(this.textOverflowIds);
+      this.textOverflowIds = elements
+        .filter(element => {
+          const id = element.dataset.taskId;
+          return this.isTextExpanded(id)
+            ? previous.has(id)
+            : element.scrollHeight > element.clientHeight + 1;
+        })
+        .map(element => element.dataset.taskId);
+    },
+    onWindowResize() {
+      this.resizeEditor();
+      this.$nextTick(this.measureTextOverflow);
     },
     currentTabId(state) {
       const requested = this.$route && this.$route.query.tab;
@@ -187,6 +233,11 @@ export default {
       this.todoList = state.todoList
         .filter(todo => todo.tabId === tabId)
         .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
+      const visibleIds = new Set(this.todoList.map(todo => todo.id));
+      this.expandedTextIds = this.expandedTextIds.filter(id =>
+        visibleIds.has(id)
+      );
+      this.$nextTick(this.measureTextOverflow);
     },
     reload() {
       if (this.editId) return;
@@ -257,6 +308,9 @@ export default {
       const item = this.todoList.find(todo => todo.id === id);
       if (!item) return;
       this.original = { ...item };
+      this.expandedTextIds = this.expandedTextIds.filter(
+        itemId => itemId !== id
+      );
       this.editId = id;
       this.selectedId = id;
       this.draft = item.content;
@@ -266,6 +320,50 @@ export default {
       this.resizeEditor();
       if (!this.editId || !this.draft.trim()) return true;
       return !!this.apply("update", { id: this.editId, content: this.draft });
+    },
+    applyOutlineChange(change, event) {
+      if (!change.changed) return false;
+      event.preventDefault();
+      const editor = event.target;
+      this.draft = change.value;
+      editor.value = change.value;
+      editor.setSelectionRange(change.selectionStart, change.selectionEnd);
+      this.resizeEditor();
+      this.persistInput({ target: editor });
+      return true;
+    },
+    continueOutline(event) {
+      if (event.isComposing || event.keyCode === 229) return;
+      this.applyOutlineChange(
+        outlineEditor.insertBulletLine(
+          event.target.value,
+          event.target.selectionStart,
+          event.target.selectionEnd
+        ),
+        event
+      );
+    },
+    changeOutlineLevel(event) {
+      this.applyOutlineChange(
+        outlineEditor.indentLines(
+          event.target.value,
+          event.target.selectionStart,
+          event.target.selectionEnd,
+          event.shiftKey
+        ),
+        event
+      );
+    },
+    deleteOutlineBullet(event) {
+      if (event.isComposing || event.keyCode === 229) return;
+      this.applyOutlineChange(
+        outlineEditor.removeBulletPrefix(
+          event.target.value,
+          event.target.selectionStart,
+          event.target.selectionEnd
+        ),
+        event
+      );
     },
     resizeEditor() {
       const refs = this.$refs.editor;
@@ -447,7 +545,7 @@ export default {
     this.unregisterFlush = taskClient.registerFlush(() => this.edited());
     window.addEventListener("tasks:changed", this.reload);
     window.addEventListener("paste", this.onPaste);
-    window.addEventListener("resize", this.resizeEditor);
+    window.addEventListener("resize", this.onWindowResize);
   },
   beforeRouteLeave(to, from, next) {
     next(this.edited() ? undefined : false);
@@ -470,7 +568,7 @@ export default {
     if (this.unregisterFlush) this.unregisterFlush();
     window.removeEventListener("tasks:changed", this.reload);
     window.removeEventListener("paste", this.onPaste);
-    window.removeEventListener("resize", this.resizeEditor);
+    window.removeEventListener("resize", this.onWindowResize);
   },
   directives: {
     focus: {
@@ -505,19 +603,25 @@ export default {
 .todo-checkbox {
   flex: 0 0 auto;
   align-self: flex-start;
-  width: 15px;
-  height: 15px;
-  margin: 6px 8px 0 0;
+  width: calc(var(--task-font-size, 16px) * 0.9375);
+  height: calc(var(--task-font-size, 16px) * 0.9375);
+  margin: calc(var(--task-font-size, 16px) * 0.375) 8px 0 0;
   cursor: pointer;
 }
 .item-main p {
   flex: 1;
   min-width: 0;
-  line-height: 28px;
+  margin: 0;
+  font-size: var(--task-font-size, 16px);
+  line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  overflow: hidden;
   cursor: pointer;
   user-select: none;
+}
+.item-main p.text-collapsed {
+  max-height: 1.75em;
 }
 .concealed {
   letter-spacing: 2px;
@@ -597,10 +701,10 @@ export default {
   outline: none;
   border: none;
   background: transparent;
-  font-size: 16px;
+  font-size: var(--task-font-size, 16px);
   font-family: inherit;
   color: inherit;
-  line-height: 28px;
+  line-height: 1.75;
   padding: 0;
   resize: none;
   overflow: hidden;
@@ -643,5 +747,19 @@ button {
   border-radius: 3px;
   padding: 2px 4px;
   cursor: pointer;
+}
+.task-expand {
+  align-self: flex-start;
+  margin: 3px 3px 0 5px;
+  padding: 1px 5px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #bdc9c1;
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.task-expand:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 </style>

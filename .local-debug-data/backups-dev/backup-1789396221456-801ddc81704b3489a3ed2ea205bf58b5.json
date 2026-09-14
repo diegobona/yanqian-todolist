@@ -61,7 +61,8 @@
   "settings": {
     "hideHintSeen": true,
     "interfaceTransparency": 10,
-    "windowLocked": false
+    "windowLocked": false,
+    "taskFontSize": 16
   },
   "trashList": [],
   "schemaVersion": 1,
