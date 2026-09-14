@@ -104,6 +104,14 @@ test('the saved transparency changes only the interface background',()=>{
  assert.ok(settings.includes('setInterfaceTransparency'));
  assert.ok(!settings.includes('只调整背景，文字和图标保持清晰'));
 });
+test('collapsed task text shows an ellipsis in todo and completed lists',()=>{
+ for(const name of ['Todo.vue','Done.vue']){
+  const source=fs.readFileSync(path.join(__dirname,'../src/views',name),'utf8');
+  const collapsed=source.slice(source.indexOf('.item-main p.text-collapsed'));
+  assert.match(collapsed,/text-overflow:\s*ellipsis/);
+  assert.match(collapsed,/white-space:\s*nowrap/);
+ }
+});
 test('lock control uses real window locking without mouse passthrough',()=>{
  const app=fs.readFileSync(path.join(__dirname,'../src/App.vue'),'utf8');
  assert.ok(app.includes('setWindowLocked'));

@@ -179,7 +179,7 @@ test('multiline todo text starts folded, expands without truncation and keeps ed
  const toggle=wrapper.find('.task-expand');assert.equal(toggle.text(),'展开');assert.equal(toggle.attributes('aria-expanded'),'false');
  await toggle.trigger('click');assert.equal(wrapper.vm.editId,'');assert.equal(wrapper.find('.task-expand').text(),'收起');assert.ok(!wrapper.find('.item-main p').classes('text-collapsed'));
  Object.defineProperty(text.element,'scrollHeight',{configurable:true,value:28});
- await wrapper.find('.task-expand').trigger('click');await Vue.nextTick();assert.ok(wrapper.find('.item-main p').classes('text-collapsed'));assert.equal(wrapper.find('.task-expand').exists(),false);
+ await wrapper.find('.task-expand').trigger('click');await Vue.nextTick();assert.ok(wrapper.find('.item-main p').classes('text-collapsed'));assert.equal(wrapper.find('.task-expand').exists(),true);
  await wrapper.find('.item').trigger('click');assert.equal(wrapper.find('textarea').element.value,full);
 });
 test('completed multiline text uses the same fold and expand interaction',async t=>{
@@ -187,6 +187,13 @@ test('completed multiline text uses the same fold and expand interaction',async 
  const text=wrapper.find('.item-main p');Object.defineProperties(text.element,{clientHeight:{configurable:true,value:28},scrollHeight:{configurable:true,value:56}});wrapper.vm.measureTextOverflow();await Vue.nextTick();
  assert.ok(text.classes('text-collapsed'));assert.equal(wrapper.find('.task-expand').text(),'展开');assert.equal(text.attributes('title'),undefined);
  await wrapper.find('.task-expand').trigger('click');assert.equal(wrapper.find('.task-expand').text(),'收起');assert.equal(wrapper.find('.item-main p').text(),'完成第一行\n完成第二行');
+});
+test('a visually overflowing single line is detected after collapsed text uses ellipsis',async t=>{
+ const {wrapper,repo}=setup(t);repo.command('add',{content:'这是一条没有手动换行但宽度超过窗口的很长事项'});wrapper.vm.reload();await Vue.nextTick();
+ const text=wrapper.find('.item-main p');Object.defineProperties(text.element,{clientHeight:{configurable:true,value:28},scrollHeight:{configurable:true,value:28},clientWidth:{configurable:true,value:160},scrollWidth:{configurable:true,value:320}});wrapper.vm.measureTextOverflow();await Vue.nextTick();
+ assert.equal(wrapper.find('.task-expand').text(),'展开');
+ await wrapper.find('.task-expand').trigger('click');Object.defineProperty(text.element,'scrollWidth',{configurable:true,value:160});await wrapper.find('.task-expand').trigger('click');await Vue.nextTick();
+ assert.equal(wrapper.find('.task-expand').exists(),false);
 });
 
 test('settings trash confirmation cancels safely and deletes only after confirmation', async t => {

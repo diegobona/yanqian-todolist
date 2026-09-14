@@ -89,9 +89,14 @@ export default {
       this.textOverflowIds = elements
         .filter(element => {
           const id = element.dataset.taskId;
+          const task = this.groups
+            .flatMap(group => group.items)
+            .find(item => item.id === id);
           return this.isTextExpanded(id)
             ? previous.has(id)
-            : element.scrollHeight > element.clientHeight + 1;
+            : (task && /[\r\n]/.test(task.content)) ||
+                element.scrollWidth > element.clientWidth + 1 ||
+                element.scrollHeight > element.clientHeight + 1;
         })
         .map(element => element.dataset.taskId);
     },
@@ -220,6 +225,8 @@ export default {
 }
 .item-main p.text-collapsed {
   max-height: 1.75em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .concealed {
   letter-spacing: 2px;

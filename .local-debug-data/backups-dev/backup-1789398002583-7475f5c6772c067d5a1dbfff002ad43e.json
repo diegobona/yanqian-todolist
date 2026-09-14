@@ -40,6 +40,27 @@
       ],
       "tabId": "todo",
       "tabName": "待办"
+    },
+    {
+      "id": "6c78891a9d658473ed3dec14bb8884b0",
+      "content": "说的是发给对方公司的风格发生的故事是的\n分公司的分公司的分公司的高富帅的官方说\n的分公司的分公司的分公司地方根深蒂固\n▪ 大口大口打开\n  ▪ 多看看都看得到看\n    ▪ 多看看的肯定",
+      "todo_date": "2026/09/14",
+      "todo_datetime": "2026/09/14 22:30:21",
+      "updated_at": "2026/09/14 22:59:09",
+      "hidden": false,
+      "pinned": false,
+      "screenshots": [
+        {
+          "id": "e370ea432e5e81bbd3a39aa7bb5e8300",
+          "fileName": "e370ea432e5e81bbd3a39aa7bb5e8300.png",
+          "created_at": "2026/09/14 22:30:40",
+          "width": 588,
+          "height": 274,
+          "size": 200294
+        }
+      ],
+      "tabId": "ddff880439b2d06ad602ed3c2673c590",
+      "tabName": "考试准备"
     }
   ],
   "doneList": [
@@ -61,11 +82,12 @@
   "settings": {
     "hideHintSeen": true,
     "interfaceTransparency": 10,
-    "windowLocked": false
+    "windowLocked": false,
+    "taskFontSize": 16
   },
   "trashList": [],
   "schemaVersion": 1,
-  "revision": 918,
+  "revision": 1048,
   "lastCompletion": {
     "id": "a165a01e1760eb9a6f35f3dd68516812",
     "index": 2
